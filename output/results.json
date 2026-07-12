@@ -1,0 +1,44 @@
+{
+  "dataset1_split": {
+    "train_cells": 52,
+    "test_cells": 14,
+    "models": {
+      "elasticnet": {
+        "rmse_train": 0.021611392428501835,
+        "rmse_test": 0.01880347250023733
+      },
+      "xgboost": {
+        "rmse_train": 0.005465383788244672,
+        "rmse_test": 0.010874819824808262
+      },
+      "svr": {
+        "rmse_train": 0.009032183670251,
+        "rmse_test": 0.010193354860088901
+      }
+    }
+  },
+  "transfer_learning": {
+    "dataset2": {
+      "zero_shot_rmse": 0.06379894891511953,
+      "tl2_rmse": 0.041443909599894656,
+      "finetune_samples": 23,
+      "eval_samples": 27779,
+      "finetune_cells": {
+        "CY25-05_1": "CY25-05_1-#11",
+        "CY35-05_1": "CY35-05_1-#4",
+        "CY45-05_1": "CY45-05_1-#26"
+      }
+    },
+    "dataset3": {
+      "zero_shot_rmse": 0.09576477856440084,
+      "tl2_rmse": 0.054067534645128326,
+      "finetune_samples": 31,
+      "eval_samples": 8551,
+      "finetune_cells": {
+        "CY25-05_1": "CY25-05_1-#1",
+        "CY25-05_2": "CY25-05_2-#3",
+        "CY25-05_4": "CY25-05_4-#2"
+      }
+    }
+  }
+}

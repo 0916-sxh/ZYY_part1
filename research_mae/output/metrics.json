@@ -1,0 +1,62 @@
+{
+  "dataset1": {
+    "split": {
+      "train_cells": 52,
+      "test_cells": 14,
+      "train_samples": 16994,
+      "test_samples": 5641
+    },
+    "test_rmse_pct": {
+      "fusion_attention": 0.5702001299176898,
+      "fusion_single": 0.7499522072928293,
+      "latent_ridge": 2.9918016706194197,
+      "cc_ridge": 5.709596470424107,
+      "latent_cc_ridge": 2.9623003278459823
+    },
+    "test_r2": {
+      "fusion_attention": 0.9907675385475159,
+      "fusion_single": 0.9840291142463684,
+      "latent_ridge": 0.7458277940750122,
+      "cc_ridge": 0.07429349422454834,
+      "latent_cc_ridge": 0.7508156895637512
+    }
+  },
+  "transfer": {
+    "dataset_2_zero_shot": {
+      "dataset": 2,
+      "n_samples": 27803,
+      "fusion_rmse_pct": 1.1610603332519531,
+      "fusion_r2": 0.9584864974021912,
+      "latent_ridge_rmse_pct": 1.6195723397391184,
+      "latent_ridge_r2": 0.9192243218421936
+    },
+    "dataset_2_tl": {
+      "finetune_samples": 23,
+      "eval_samples": 27780,
+      "zero_shot_rmse_pct": 1.1615329197474888,
+      "tl_finetune_rmse_pct": 2.6181283133370536,
+      "tl_finetune_r2": 0.7890768051147461,
+      "finetune_cells": {
+        "CY25-05_1": "CY25-05_1-#11",
+        "CY35-05_1": "CY35-05_1-#4",
+        "CY45-05_1": "CY45-05_1-#26"
+      }
+    },
+    "dataset_2_native": {
+      "dataset": 2,
+      "n_val_samples": 4318,
+      "fusion_rmse_pct": 0.36088025229317805,
+      "fusion_r2": 0.9955665469169617,
+      "latent_ridge_rmse_pct": 1.6711551121303014,
+      "latent_ridge_r2": 0.9049282073974609
+    },
+    "dataset_3": {
+      "dataset": 3,
+      "n_val_samples": 922,
+      "fusion_rmse_pct": 0.9356088256835938,
+      "fusion_r2": 0.9893435835838318,
+      "latent_ridge_rmse_pct": 2.243177795410156,
+      "latent_ridge_r2": 0.9387438297271729
+    }
+  }
+}

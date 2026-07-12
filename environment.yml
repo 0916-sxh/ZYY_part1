@@ -1,0 +1,20 @@
+name: battery-capacity
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - scikit-learn
+  - scipy
+  - pyarrow
+  - openpyxl
+  - matplotlib
+  - pip
+  - pip:
+    - xgboost>=2.0
+
+# Optional GPU packages (not required for default CPU pipeline):
+#   conda install -c rapidsai -c conda-forge -c nvidia cuml=25.12 cuda-version=12.2
+# Then run with: BATTERY_SVR=gpu python run_pipeline.py

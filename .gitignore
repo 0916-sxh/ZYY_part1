@@ -1,0 +1,16 @@
+# 原始循环 CSV 数据集（体积大，需自行从 Zenodo 下载）
+Dataset_1_NCA_battery/
+Dataset_2_NCM_battery/
+Dataset_3_NCM_NCA_battery/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
