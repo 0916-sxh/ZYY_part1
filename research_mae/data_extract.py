@@ -9,6 +9,8 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from research_mae.cc_filter import filter_rows_dataset1
+
 ROOT = Path(__file__).resolve().parent.parent
 
 CSV_COLS = [
@@ -25,7 +27,7 @@ DATASET_CFG = {
     1: {
         "dir": "Dataset_1_NCA_battery",
         "relax_duration_s": 30 * 60,
-        "seq_len": 30,
+        "seq_len": 32,
         "capacity_min": 2500.0,
         "capacity_max": 3500.0,
         "extractor": "short",
@@ -33,7 +35,7 @@ DATASET_CFG = {
     2: {
         "dir": "Dataset_2_NCM_battery",
         "relax_duration_s": 30 * 60,
-        "seq_len": 30,
+        "seq_len": 32,
         "capacity_min": 2500.0,
         "capacity_max": None,
         "extractor": "short",
@@ -41,7 +43,7 @@ DATASET_CFG = {
     3: {
         "dir": "Dataset_3_NCM_NCA_battery",
         "relax_duration_s": 60 * 60,
-        "seq_len": 60,
+        "seq_len": 64,
         "capacity_min": 1650.0,
         "capacity_max": 2510.0,
         "extractor": "long",
@@ -253,6 +255,12 @@ def build_dataset(dataset_id: int, cache_dir: Optional[Path] = None) -> pd.DataF
     if not rows:
         raise RuntimeError(f"No cycles for dataset {dataset_id}")
 
+    cc_filter_stats = {}
+    if dataset_id == 1:
+        rows, cc_filter_stats = filter_rows_dataset1(rows)
+        if not rows:
+            raise RuntimeError(f"All cycles removed by CC filter for dataset {dataset_id}")
+
     delta_v = np.stack([r["delta_v"] for r in rows])
     mu = float(delta_v.mean())
     sigma = float(delta_v.std()) + 1e-6
@@ -279,6 +287,7 @@ def build_dataset(dataset_id: int, cache_dir: Optional[Path] = None) -> pd.DataF
         cycle=meta["cycle"].values,
         capacity=meta["Capacity"].values,
         cc_time_s=meta["cc_time_s"].values,
+        cc_filter_stats=cc_filter_stats,
     )
     return meta
 

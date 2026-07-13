@@ -1,4 +1,4 @@
-"""Temporal convolution masked autoencoder + channel attention fusion."""
+"""MS-CNN masked autoencoder + channel-attention multimodal fusion."""
 
 from __future__ import annotations
 
@@ -20,19 +20,41 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 
-class TemporalMaskedAE(nn.Module):
-    """1D-CNN masked autoencoder for relaxation ΔV sequences."""
+class MSConvBlock(nn.Module):
+    """Parallel conv branches (kernels 3/5/7) for multi-scale temporal patterns."""
 
-    def __init__(self, seq_len: int = 30, latent_dim: int = 32, mask_ratio: float = 0.3):
+    def __init__(self, in_ch: int, out_ch: int, kernels: tuple[int, ...] = (3, 5, 7)):
+        super().__init__()
+        branch_ch = max(out_ch // len(kernels), 8)
+        self.branches = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv1d(in_ch, branch_ch, k, padding=k // 2),
+                    nn.BatchNorm1d(branch_ch),
+                    nn.GELU(),
+                )
+                for k in kernels
+            ]
+        )
+        self.merge = nn.Conv1d(branch_ch * len(kernels), out_ch, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.merge(torch.cat([b(x) for b in self.branches], dim=1))
+
+
+class MSCNNMaskedAE(nn.Module):
+    """Multi-scale 1D-CNN masked autoencoder for relaxation ΔV sequences."""
+
+    def __init__(self, seq_len: int = 32, latent_dim: int = 32, mask_ratio: float = 0.3):
         super().__init__()
         self.seq_len = seq_len
         self.latent_dim = latent_dim
         self.mask_ratio = mask_ratio
 
         self.encoder = nn.Sequential(
-            ConvBlock(1, 32, 5),
-            ConvBlock(32, 64, 5),
-            ConvBlock(64, 128, 3),
+            MSConvBlock(1, 32),
+            MSConvBlock(32, 64),
+            MSConvBlock(64, 128),
             nn.AdaptiveAvgPool1d(1),
         )
         self.to_latent = nn.Linear(128, latent_dim)
@@ -54,11 +76,11 @@ class TemporalMaskedAE(nn.Module):
         return self.decoder(h)
 
     def random_mask(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        b, _, l = x.shape
-        n_mask = max(1, int(l * self.mask_ratio))
-        mask = torch.ones(b, l, device=x.device)
+        b, _, length = x.shape
+        n_mask = max(1, int(length * self.mask_ratio))
+        mask = torch.ones(b, length, device=x.device)
         for i in range(b):
-            idx = torch.randperm(l, device=x.device)[:n_mask]
+            idx = torch.randperm(length, device=x.device)[:n_mask]
             mask[i, idx] = 0.0
         mask = mask.unsqueeze(1)
         return x * mask, mask
@@ -70,8 +92,45 @@ class TemporalMaskedAE(nn.Module):
         return {"recon": recon, "mask": mask, "latent": z}
 
 
+# Backward-compatible alias
+TemporalMaskedAE = MSCNNMaskedAE
+
+
+class ChannelAttentionFusion(nn.Module):
+    """
+    Softmax channel attention over relaxation latent vs CC macro features.
+    Weights sum to 1 and adapt to the current aging stage.
+    """
+
+    def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2, temperature: float = 1.0):
+        super().__init__()
+        self.temperature = temperature
+        self.cc_embed = nn.Sequential(
+            nn.Linear(cc_feat_dim, latent_dim),
+            nn.GELU(),
+            nn.Linear(latent_dim, latent_dim),
+        )
+        self.relax_proj = nn.Linear(latent_dim, latent_dim)
+        self.attn = nn.Sequential(
+            nn.Linear(latent_dim * 2, latent_dim),
+            nn.GELU(),
+            nn.Linear(latent_dim, 2),
+        )
+
+    def forward(
+        self, relax_latent: torch.Tensor, cc_feat: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        relax_feat = self.relax_proj(relax_latent)
+        cc_emb = self.cc_embed(cc_feat)
+        ctx = torch.cat([relax_feat, cc_emb], dim=-1)
+        logits = self.attn(ctx) / self.temperature
+        weights = F.softmax(logits, dim=-1)
+        fused = weights[:, 0:1] * relax_feat + weights[:, 1:2] * cc_emb
+        return fused, weights
+
+
 class GatedChannelFusion(nn.Module):
-    """Independent sigmoid gates for relaxation vs CC features (no softmax collapse)."""
+    """Legacy sigmoid gates (kept for loading old checkpoints)."""
 
     def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2):
         super().__init__()
@@ -96,10 +155,6 @@ class GatedChannelFusion(nn.Module):
         denom = g_r + g_c + 1e-6
         weights = torch.cat([g_r / denom, g_c / denom], dim=-1)
         return fused, weights
-
-
-# Backward-compatible alias
-ChannelAttentionFusion = GatedChannelFusion
 
 
 class CapacityHead(nn.Module):
@@ -138,7 +193,7 @@ def train_mae_epoch(model, loader, optimizer, device, max_grad_norm: float = 1.0
         recon = out["recon"]
         mse = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
         smooth = torch.mean((recon[:, :, 1:] - recon[:, :, :-1]) ** 2)
-        loss = mse + 0.08 * smooth
+        loss = mse + 0.05 * smooth
         optimizer.zero_grad()
         loss.backward()
         if max_grad_norm > 0:
@@ -152,6 +207,6 @@ def train_mae_epoch(model, loader, optimizer, device, max_grad_norm: float = 1.0
 
 
 @torch.no_grad()
-def infer_latent(model: TemporalMaskedAE, x: torch.Tensor, device) -> torch.Tensor:
+def infer_latent(model: MSCNNMaskedAE, x: torch.Tensor, device) -> torch.Tensor:
     model.eval()
     return model.encode(x.to(device)).cpu()

@@ -1,0 +1,21 @@
+{
+  "dataset_id": 3,
+  "n_samples": 8582,
+  "latent_dim": 32,
+  "files": {
+    "fused": "dataset_3_fused.npy",
+    "latent": "dataset_3_latent.npy",
+    "meta": "dataset_3_meta.npz"
+  },
+  "shapes": {
+    "fused": [
+      8582,
+      32
+    ],
+    "latent": [
+      8582,
+      32
+    ]
+  },
+  "description": "Research content 1: MS-CNN latent + channel-attention fused features"
+}

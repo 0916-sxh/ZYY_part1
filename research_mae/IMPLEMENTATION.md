@@ -54,41 +54,30 @@
 
 ---
 
-## 三、掩码自编码器（MAE）
+## 三、掩码自编码器（MS-CNN MAE）
 
 ### 结构
 
 | 组件 | 配置 |
 |------|------|
-| Encoder | Conv1d 1→32→64→128 + GAP + Linear → **32 维**隐向量 |
+| Encoder | **MSConvBlock** ×3（并行 kernel 3/5/7）→ GAP → Linear → **32 维**隐向量 |
 | Decoder | Linear → Conv1d 128→64→32→16→1 |
 | 掩码比例 | 30% 时间步随机置零 |
-| 损失 | 掩码位置 MSE + **0.05×平滑正则**（减少重构锯齿） |
+| 损失 | 掩码位置 MSE + **0.05×平滑正则** |
 
-### 训练
+序列维度：D1/D2 **32 点**（30 min），D3 **64 点**（60 min）。
 
-- Dataset 1+2 合并训练 `mae_short`（seq=30）
-- Dataset 3 单独训练 `mae_long`（seq=60）
-- 默认 **40 epoch**，Adam lr=1e-3
+实现文件：`research_mae/models.py` → `MSCNNMaskedAE`（`TemporalMaskedAE` 为兼容别名）
 
-实现文件：`research_mae/models.py`、`research_mae/train.py`
+> 完整方法说明见 **[RESEARCH_CONTENT_1.md](./RESEARCH_CONTENT_1.md)**。
 
 ---
 
-## 四、通道注意力融合（Fig 5 Debug）
+## 四、通道注意力融合（Fig 5）
 
-### 问题（初版）
+**实现**：`ChannelAttentionFusion`（Softmax 两路权重，熵正则防塌缩）。
 
-注意力权重塌缩：弛豫=1.0，CC=0.0，无动态变化。
-
-### 修复
-
-1. CC 时间改为 **z-score 标准化**（保留跨循环变化）
-2. 双路分别经 `Linear` / `MLP` 投影到同维度
-3. 损失函数增加：
-   - **熵正则** `−λ·H(w)`（λ=0.15，鼓励权重分散）
-   - **平衡项** `0.05·Σ(mean(w)−0.5)²`（弱约束，避免权重完全冻结在 0.5）
-4. 训练 epoch 增至 **80**
+历史版本曾用 `GatedChannelFusion`（Sigmoid 门控），见第十节。
 
 实现文件：`research_mae/models.py` → `ChannelAttentionFusion`
 
@@ -142,7 +131,9 @@ research_mae/
 ├── training_log.py      # 训练历史 dataclass
 ├── plot_training.py     # 训练曲线绘图
 ├── evaluate.py          # Strategy D 容量回归评估
+├── export_features.py # 融合特征 .npy 导出（研究内容二接口）
 ├── run_all.py           # 入口
+├── RESEARCH_CONTENT_1.md  # 研究内容一完整说明
 ├── cache/               # npz 缓存
 ├── checkpoints/         # 模型 pt
 ├── output/              # metrics.json

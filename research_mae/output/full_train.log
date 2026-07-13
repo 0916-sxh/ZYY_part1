@@ -1,0 +1,87 @@
+Device: cpu
+
+=== Step 1: Extract & cache data ===
+
+=== Step 2: Train MS-CNN MAE ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/torch/autograd/graph.py:979: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 12080). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  [short] epoch 1/80  train=0.030881  val=0.001603  lr=1.00e-03
+  [short] epoch 10/80  train=0.016756  val=0.001190  lr=9.62e-04
+  [short] epoch 20/80  train=0.011322  val=0.036868  lr=8.54e-04
+  [short] early stop at epoch 26  best_val=0.001153
+  [long] epoch 1/80  train=0.056466  val=0.002736  lr=1.00e-03
+  [long] epoch 10/80  train=0.002191  val=0.001458  lr=9.62e-04
+  [long] epoch 20/80  train=0.003124  val=0.002478  lr=8.54e-04
+  [long] epoch 30/80  train=0.001624  val=0.001141  lr=6.91e-04
+  [long] epoch 40/80  train=0.001290  val=0.001447  lr=5.00e-04
+  [long] epoch 50/80  train=0.000628  val=0.000174  lr=3.09e-04
+  [long] epoch 60/80  train=0.000353  val=0.000159  lr=1.46e-04
+  [long] epoch 70/80  train=0.000396  val=0.000118  lr=3.81e-05
+  [long] epoch 80/80  train=0.000294  val=0.000112  lr=0.00e+00
+
+=== Step 3: Train fusion D1 ensemble (seeds=[42, 43, 44]) + D2/D3 ===
+  [fusion-ds1] epoch 1/150  train=0.365759  val_rmse=8.02%  w=(0.517,0.483)
+  [fusion-ds1] epoch 20/150  train=0.002382  val_rmse=0.74%  w=(0.458,0.542)
+  [fusion-ds1] epoch 40/150  train=0.001215  val_rmse=0.84%  w=(0.443,0.557)
+  [fusion-ds1] epoch 60/150  train=0.000903  val_rmse=0.75%  w=(0.424,0.576)
+  [fusion-ds1] early stop at epoch 72  best_val_rmse=0.69%
+  [fusion-ds1] epoch 1/150  train=0.540914  val_rmse=22.27%  w=(0.509,0.491)
+  [fusion-ds1] epoch 20/150  train=0.003172  val_rmse=0.90%  w=(0.463,0.537)
+  [fusion-ds1] epoch 40/150  train=0.001282  val_rmse=0.69%  w=(0.448,0.552)
+  [fusion-ds1] epoch 60/150  train=0.001209  val_rmse=0.76%  w=(0.433,0.567)
+  [fusion-ds1] epoch 80/150  train=0.000900  val_rmse=0.68%  w=(0.419,0.581)
+  [fusion-ds1] early stop at epoch 84  best_val_rmse=0.58%
+  [fusion-ds1] epoch 1/150  train=0.282845  val_rmse=4.30%  w=(0.509,0.491)
+  [fusion-ds1] epoch 20/150  train=0.001331  val_rmse=1.00%  w=(0.440,0.560)
+  [fusion-ds1] epoch 40/150  train=0.000939  val_rmse=0.60%  w=(0.428,0.572)
+  [fusion-ds1] early stop at epoch 53  best_val_rmse=0.51%
+  [fusion-ds2] epoch 1/150  train=0.227829  val_rmse=3.24%  w=(0.521,0.479)
+  [fusion-ds2] epoch 20/150  train=0.000936  val_rmse=0.63%  w=(0.479,0.521)
+  [fusion-ds2] epoch 40/150  train=0.000401  val_rmse=0.53%  w=(0.440,0.560)
+  [fusion-ds2] epoch 60/150  train=0.000298  val_rmse=0.49%  w=(0.418,0.582)
+  [fusion-ds2] early stop at epoch 78  best_val_rmse=0.33%
+  [fusion-ds3] epoch 1/150  train=0.521399  val_rmse=42.56%  w=(0.517,0.483)
+  [fusion-ds3] epoch 20/150  train=0.006541  val_rmse=1.38%  w=(0.445,0.555)
+  [fusion-ds3] epoch 40/150  train=0.001328  val_rmse=1.22%  w=(0.433,0.567)
+  [fusion-ds3] epoch 60/150  train=0.000723  val_rmse=1.18%  w=(0.430,0.570)
+  [fusion-ds3] early stop at epoch 62  best_val_rmse=0.89%
+
+=== Step 4: Evaluate Dataset 1 (Strategy D) ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/sklearn/linear_model/_ridge.py:213: LinAlgWarning: Ill-conditioned matrix (rcond=7.10687e-12): result may not be accurate.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+  D1 fusion=0.54%  single=0.69%  latent=3.61%
+
+=== Step 5: D2 transfer (zero-shot + TL finetune + native) ===
+  D2 zero-shot=1.44%  TL finetune=2.20%  native holdout=0.33%
+
+=== Step 6: D3 holdout ===
+  D3 holdout fusion=0.89%  latent=2.33%
+  Summary: /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/output/RESULTS.md
+
+=== Step 7: Export fused features (.npy) ===
+  Dataset 1: dataset_1_fused.npy  (22635 samples)
+  Dataset 2: dataset_2_fused.npy  (27803 samples)
+  Dataset 3: dataset_3_fused.npy  (8582 samples)
+
+=== Step 8: Training curves ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_mae_short.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_mae_long.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_fusion_ds1.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_fusion_ds1_s43.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_fusion_ds1_s44.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_fusion_ds2.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_fusion_ds3.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/train_overview_val_loss.png
+
+=== Step 9: Result figures ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig3_mae_recon_dataset1.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig3_mae_recon_dataset2.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig3_mae_recon_dataset3.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig4_latent_manifold_single_cell.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig4_latent_manifold_all.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig5_attention_weights.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig5_attention_by_condition.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig6_capacity_prediction.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig7_transfer_comparison.png
+
+Done.

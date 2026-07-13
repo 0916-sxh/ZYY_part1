@@ -1,11 +1,18 @@
-# 基于电压弛豫曲线的商业锂电池容量估计
+# 融合弛豫电压多尺度特征的锂电池剩余寿命预测
 
-本仓库包含两条实现线：
+本仓库基于 Zhu et al. (2022) 公开数据集，实现**论文复现**与两项研究内容：
 
-1. **论文复现**（`battery_pipeline/`）：Zhu et al. (2022) [*Data-driven capacity estimation of commercial lithium-ion batteries from voltage relaxation*](https://doi.org/10.1038/s41467-022-29837-w) 的统计特征 + SVR/XGBoost/TL2 流水线
-2. **研究内容一**（`research_mae/`）：弛豫序列掩码自编码器（MAE）+ 门控通道融合，用于容量回归与跨数据集迁移
+| 模块 | 目录 | 内容 |
+|------|------|------|
+| 论文复现 | `battery_pipeline/` | 统计特征 + SVR/XGBoost/TL2 |
+| **研究内容一** | `research_mae/` | MS-CNN MAE + 门控融合 → 退化特征 `.npy` |
+| **研究内容二** | `research_rul/` | Quantile TCN + Pinball Loss + 单调惩罚 → RUL |
 
-原始仓库仅提供**部分特征截取脚本**与**原始实验数据**；建模与迁移学习代码需向作者索取。本实现在此基础上补全论文复现，并扩展深度学习方案。
+```
+研究内容一（特征）  →  融合特征 .npy
+        ↓
+研究内容二（RUL）  →  Quantile TCN 预测剩余寿命 + 不确定性区间
+```
 
 原始实验数据：[Zenodo 10.5281/zenodo.6405084](https://doi.org/10.5281/zenodo.6405084)
 
@@ -15,134 +22,29 @@
 
 ```
 .
-├── Dataset_{1,2,3}_*/               # 三个数据集原始循环 CSV
-├── battery_pipeline/                # 论文复现（统计特征 + 经典 ML）
-├── run_pipeline.py                  # 论文流水线入口
-├── run_figures.py                   # 论文图表生成
-├── research_mae/                    # 研究内容一（MAE + 门控融合）
-│   ├── run_all.py                   # 一键运行
-│   ├── figures/                     # 研究图表（见下文）
-│   ├── IMPLEMENTATION.md            # 实现与 Debug 记录
-│   └── PAPER_METHODS_RESULTS.md     # 论文方法 + 实验对照
-├── output/                          # 论文复现输出（features、results.json、figures）
+├── Dataset_{1,2,3}_*/          # 原始循环 CSV（需自行下载）
+├── battery_pipeline/           # 论文复现
+├── research_mae/               # 研究内容一
+│   ├── run_all.py              # MAE + 融合 + 特征导出 + Fig 1–5
+│   ├── thesis_figures.py       # 论文规格图表
+│   ├── cc_filter.py            # D1 CC 突变剔除
+│   ├── features/               # dataset_*_fused.npy
+│   ├── figures/                # Fig 1–5
+│   └── RESEARCH_CONTENT_1.md   # 详细说明
+├── research_rul/               # 研究内容二
+│   ├── run_all.py              # Quantile TCN + Fig 6–9
+│   ├── figures/                # Fig 6–9
+│   └── RESEARCH_CONTENT_2.md   # 详细说明
+├── run_research.py             # 研究内容一 + 二 一键运行
+├── run_pipeline.py             # 论文复现入口
+├── run_figures.py              # 论文图表
 ├── environment.yml
 └── requirements.txt
 ```
 
 ---
 
-## 研究内容一：MAE + 门控融合
-
-### 方法概述
-
-```
-原始 CSV（电压/电流/容量）
-    ↓ 截取满充后弛豫 ΔV，固定长度重采样
-    ↓ 提取 CC 恒流充电时间
-    ↓ MAE 编码器 → 32 维隐向量 z
-    ↓ 门控融合（弛豫 z + CC 特征）→ 容量回归
-    ↓ Strategy D 留出电芯评估 / 跨数据集迁移
-```
-
-- **ΔV 序列**：`V(t) − V(t₀)`，Dataset 1/2 为 30 点（30 min），Dataset 3 为 60 点（60 min）
-- **CC 特征**：`log(CC/CC₀)` 与 z-score 双通道
-- **融合模块**：Sigmoid 门控（替代易塌缩的 Softmax 注意力），两路权重可解释
-
-运行方式：
-
-```bash
-conda activate battery-capacity
-cd /path/to/data-driven-capacity-estimation-from-voltage-relaxation
-
-# 完整流程
-PYTHONUNBUFFERED=1 python research_mae/run_all.py --device cpu
-
-# 复用 MAE checkpoint，仅重训 Fusion
-python research_mae/run_all.py --skip-mae --device cpu
-```
-
-更多细节见 [`research_mae/README.md`](research_mae/README.md)、[`research_mae/FIGURES.md`](research_mae/FIGURES.md)（每张图的说明）、[`research_mae/IMPLEMENTATION.md`](research_mae/IMPLEMENTATION.md)。
-
-### 定量结果（Strategy D 留出电芯）
-
-| 方法 | Test RMSE% | R² |
-|------|------------|-----|
-| **D1 集成（3 seeds）** | **0.57%** | 0.99 |
-| D1 单模型 | 0.75% | 0.98 |
-| 论文复现 SVR（对照） | ~1.02% | — |
-| D2 零样本 | 1.16% | 0.96 |
-| D2 原生留出 | **0.36%** | 0.99 |
-| D3 原生留出 | 0.94% | 0.99 |
-
-详见 `research_mae/output/metrics.json`。
-
-### 研究图表
-
-#### Fig 1 — 弛豫 ΔV 曲线（第 10 / 300 / 600 圈）
-
-![Fig 1 弛豫 ΔV](research_mae/figures/fig1_relaxation_delta_v.png)
-
-#### Fig 2 — CC 充电时间随循环退化
-
-| Dataset 1 (NCA) | Dataset 2 (NCM) |
-|-----------------|-----------------|
-| ![Fig 2 D1](research_mae/figures/fig2_cc_time_dataset1.png) | ![Fig 2 D2](research_mae/figures/fig2_cc_time_dataset2.png) |
-
-#### Fig 3 — MAE 掩码重构（初 / 中 / 末期）
-
-![Fig 3 D1](research_mae/figures/fig3_mae_recon_dataset1.png)
-
-![Fig 3 D2](research_mae/figures/fig3_mae_recon_dataset2.png)
-
-![Fig 3 D3](research_mae/figures/fig3_mae_recon_dataset3.png)
-
-#### Fig 4 — 隐向量流形（t-SNE）
-
-| 单电芯老化轨迹 | 全数据集 |
-|----------------|----------|
-| ![Fig 4 单电芯](research_mae/figures/fig4_latent_manifold_single_cell.png) | ![Fig 4 全体](research_mae/figures/fig4_latent_manifold_all.png) |
-
-#### Fig 5 — 门控融合权重随老化演变
-
-![Fig 5 权重](research_mae/figures/fig5_attention_weights.png)
-
-![Fig 5 按工况](research_mae/figures/fig5_attention_by_condition.png)
-
-#### Fig 6 — Strategy D 测试集容量预测
-
-![Fig 6 预测散点](research_mae/figures/fig6_capacity_prediction.png)
-
-#### Fig 7 — 跨数据集迁移对比
-
-![Fig 7 迁移](research_mae/figures/fig7_transfer_comparison.png)
-
-#### 训练曲线
-
-![训练总览](research_mae/figures/train_overview_val_loss.png)
-
-| MAE 短序列 | MAE 长序列 (D3) |
-|------------|-----------------|
-| ![train MAE short](research_mae/figures/train_mae_short.png) | ![train MAE long](research_mae/figures/train_mae_long.png) |
-
-| Fusion D1 | Fusion D2 | Fusion D3 |
-|-----------|-----------|-----------|
-| ![train fusion ds1](research_mae/figures/train_fusion_ds1.png) | ![train fusion ds2](research_mae/figures/train_fusion_ds2.png) | ![train fusion ds3](research_mae/figures/train_fusion_ds3.png) |
-
----
-
-## 论文复现（统计特征 + 经典 ML）
-
-### 方法概述
-
-从**满充后弛豫电压曲线**提取统计特征 `[Var, Ske, Max]`，用 ElasticNet / XGBoost / SVR 估计归一化放电容量；Dataset 2/3 上采用 TL2 线性变换层做迁移微调。
-
-```
-原始 CSV → 截取弛豫电压段 → Var/Ske/Max → 归一化 → Dataset 1 训练
-                                              ↓
-                                    TL2 迁移至 Dataset 2/3
-```
-
-### 环境配置
+## 环境配置
 
 ```bash
 conda env create -f environment.yml
@@ -150,58 +52,158 @@ conda activate battery-capacity
 # 或：pip install -r requirements.txt
 ```
 
-主要依赖：`numpy`、`pandas`、`scikit-learn`、`xgboost`、`scipy`；研究线另需 `torch`。
+主要依赖：`numpy`、`pandas`、`scikit-learn`、`torch`、`matplotlib`、`scipy`。
 
-### 运行方式
+---
+
+## 一键运行（研究内容一 + 二）
 
 ```bash
-# 特征已缓存：仅建模 + 迁移学习
-PYTHONUNBUFFERED=1 BATTERY_SVR=cpu python run_pipeline.py --models-only
+conda activate battery-capacity
+cd /path/to/data-driven-capacity-estimation-from-voltage-relaxation
 
-# 完整流程（特征提取 + 建模 + 迁移）
-python run_pipeline.py
-
-# 论文图表（输出至 output/figures/）
-python run_figures.py --skip-training   # Fig 1–3，无需重训
-python run_figures.py                   # 含 Fig 4、Fig 6
+# 完整流程：数据缓存 → MAE → 融合 → 特征导出 → RUL 训练 → 全部图表
+python run_research.py --rebuild-data --device cpu
 ```
 
-环境变量：`BATTERY_DEVICE=auto`（XGBoost）、`BATTERY_SVR=cpu`（SVR 后端）。
+分步运行：
 
-### 复现结果
+```bash
+# 仅研究内容一
+python research_mae/run_all.py --rebuild-data --device cpu
 
-**Dataset 1 基础模型（`random_state=42`，CPU SVR）**
+# 仅研究内容二（需先完成特征导出）
+python research_rul/run_all.py --device cpu
 
-| 模型 | 训练 RMSE | 测试 RMSE | 论文参考 |
-|------|-----------|-----------|----------|
-| ElasticNet | 2.16% | 1.88% | — |
-| XGBoost | 0.55% | **1.09%** | 1.1% |
-| SVR | 0.90% | **1.02%** | 1.1% |
+# 仅重新出 Fig 6–9
+python research_rul/run_all.py --figures-only --device cpu
+```
 
-**迁移学习 TL2 + SVR**
+---
 
-| 数据集 | Zero-shot | TL2 | 论文 TL2 |
-|--------|-----------|-----|----------|
-| Dataset 2 (NCM) | 6.38% | 4.14% | 1.7% |
-| Dataset 3 (NCM+NCA) | 9.58% | 5.41% | 1.6% |
+## 研究内容一：退化特征提取
 
-结果写入 `output/results.json`。实现细节（弛豫截取、Strategy D 划分、TL2 优化）见 [`research_mae/PAPER_METHODS_RESULTS.md`](research_mae/PAPER_METHODS_RESULTS.md)。
+### 方法
 
-### 论文图表（`output/figures/`）
+```
+原始 CSV
+  → 满充后弛豫 ΔV 序列（D1/D2: 32 点，D3: 64 点）
+  → MS-CNN 掩码自编码器（30% 掩码无监督）→ 32 维隐向量
+  → 门控通道融合 [弛豫隐向量, CC 充电时间]
+  → 融合特征 f → 导出 .npy（模块解耦）
+```
 
-| 文件 | 内容 |
+**Dataset 1 特殊处理**：`cc_filter.py` 对 CC 充电时间做 rolling-median 突变检测，剔除异常段（约 129 圈）。
+
+### 定量结果（Strategy D 留出电芯，容量回归验证特征质量）
+
+| 方法 | Test RMSE% | R² |
+|------|------------|-----|
+| **D1 集成（3 seeds）** | **0.55%** | 0.992 |
+| D1 单模型 | 0.67% | 0.986 |
+| 论文 SVR 基线 | ~1.02% | — |
+| D2 原生留出 | **0.33%** | 0.996 |
+| D3 原生留出 | 0.89% | 0.990 |
+
+### 图表（Fig 1–5）
+
+#### Fig 1 — 弛豫电压提取（Dataset 1，绝对电压，老化渐变）
+
+![Fig 1](research_mae/figures/fig1_relaxation_voltage.png)
+
+#### Fig 2 — 恒流充电时间退化（Dataset 1，CC 突变已剔除）
+
+![Fig 2](research_mae/figures/fig2_cc_time_dataset1.png)
+
+#### Fig 3 — MS-CNN MAE 掩码重构（D1 / D2 / D3，初·中·末期）
+
+![Fig 3](research_mae/figures/fig3_mae_reconstruction.png)
+
+#### Fig 4 — 隐向量老化流形（t-SNE，分数据集 + Spearman）
+
+![Fig 4](research_mae/figures/fig4_latent_manifold.png)
+
+#### Fig 5 — 通道注意力权重 vs 归一化寿命比率
+
+![Fig 5](research_mae/figures/fig5_channel_attention.png)
+
+详细说明：[research_mae/RESEARCH_CONTENT_1.md](research_mae/RESEARCH_CONTENT_1.md)
+
+---
+
+## 研究内容二：RUL 预测 + 不确定性量化
+
+### 方法
+
+```
+融合特征序列 [f_1, …, f_i]
+  → Quantile TCN（因果卷积，5%/50%/95% 分位数）
+  → Pinball Loss + 单调递减物理惩罚
+  → RUL 点预测 + 90% 置信区间
+```
+
+- **RUL 标签**：EOL = 80% 标称容量，RUL_i = N_EOL − cycle_i；删失电芯剔除
+- **评估划分**：Dataset 1 Strategy D 留出 14 颗测试电芯
+
+### 定量结果（Strategy D 测试集）
+
+| 指标 | 数值 |
 |------|------|
-| `fig1a_voltage_current_profile.png` | 首圈电压/电流曲线 |
-| `fig1b_relaxation_voltage_trend.png` | 弛豫电压随循环变化 |
-| `fig1c/d/e_capacity_fade_*.png` | 三数据集容量衰减 |
-| `fig2_features_vs_capacity.png` | 六特征 vs 容量 |
-| `fig3_feature_combination_cv_rmse.png` | XGBoost 特征组合 CV RMSE |
-| `fig4a_rmse_comparison.png` | 三模型 RMSE 柱状图 |
-| `fig4b/c/d_*_scatter.png` | 估计 vs 真实容量散点 |
-| `fig6_tl2_svr_dataset2/3.png` | TL2+SVR 迁移结果 |
-| `supp_nyquist_nca_cy25_05_1.png` | 阻抗 Nyquist 图 |
+| **RMSE** | **24.3 圈** |
+| **MAE** | 13.7 圈 |
+| PICP (90%) | 0.49 |
+| PINAW | 0.13 |
 
-> Fig 5（ECM 电阻随容量变化）需额外等效电路参数提取，当前仅提供 Nyquist 可视化。
+### 消融实验（Fig 7）
+
+| 特征输入 | RMSE (圈) | MAE (圈) |
+|---------|-----------|----------|
+| 仅弛豫 latent | 37.0 | 20.7 |
+| 仅 CC | 29.0 | 15.4 |
+| 拼接 concat | 32.4 | 18.2 |
+| **融合 fused（本文）** | **24.1** | **13.3** |
+
+### 图表（Fig 6–9）
+
+#### Fig 6 — 单调物理惩罚有效性（有/无约束 RUL 预测对比）
+
+![Fig 6](research_rul/figures/fig6_monotonic_penalty.png)
+
+#### Fig 7 — 多特征融合消融（RMSE / MAE）
+
+![Fig 7](research_rul/figures/fig7_ablation.png)
+
+#### Fig 8 — 全寿命 RUL 预测与 90% 置信区间
+
+![Fig 8](research_rul/figures/fig8_rul_confidence.png)
+
+#### Fig 9 — 跨数据集零样本迁移（D1 训练 → D2 / D3）
+
+| Dataset 2 (NCM) | Dataset 3 (NCM+NCA) |
+|-----------------|---------------------|
+| ![Fig 9 D2](research_rul/figures/fig9_transfer_dataset2.png) | ![Fig 9 D3](research_rul/figures/fig9_transfer_dataset3.png) |
+
+详细说明：[research_rul/RESEARCH_CONTENT_2.md](research_rul/RESEARCH_CONTENT_2.md)
+
+---
+
+## 论文复现（统计特征 + 经典 ML）
+
+从满充后弛豫电压提取 `[Var, Ske, Max]`，用 ElasticNet / XGBoost / SVR 估计容量；Dataset 2/3 采用 TL2 迁移。
+
+```bash
+python run_pipeline.py --models-only
+python run_figures.py --skip-training
+```
+
+| 模型 | D1 Test RMSE | 论文参考 |
+|------|-------------|----------|
+| XGBoost | 1.09% | 1.1% |
+| SVR | 1.02% | 1.1% |
+
+迁移 TL2：D2 4.14%，D3 5.41%（论文 TL2：1.7% / 1.6%）。
+
+结果见 `output/results.json`。
 
 ---
 
@@ -210,21 +212,20 @@ python run_figures.py                   # 含 Fig 4、Fig 6
 | 内容 | 作者提供 | 本仓库 |
 |------|----------|--------|
 | 原始循环 CSV | ✅ | 直接使用 |
-| 弛豫电压段截取 | ✅ 部分脚本 | ✅ `battery_pipeline/features.py` |
-| 统计特征 Var/Ske/Max | ❌ | ✅ |
-| ElasticNet / XGBoost / SVR | ❌ | ✅ |
+| 弛豫电压段截取 | ✅ 部分脚本 | ✅ |
+| 统计特征 + SVR/XGBoost | ❌ | ✅ `battery_pipeline/` |
 | 迁移学习 TL2 | ❌ | ✅ |
-| MAE + 门控融合（研究扩展） | ❌ | ✅ `research_mae/` |
-| 论文图表 | ❌ | ✅ `run_figures.py` |
+| MS-CNN MAE + 门控融合 | ❌ | ✅ `research_mae/` |
+| Quantile TCN RUL 预测 | ❌ | ✅ `research_rul/` |
 
 ---
 
 ## 注意事项
 
-1. **内存**：特征提取采用流式处理，正常运行 < 2 GB；勿一次性加载全部原始 CSV。
-2. **SVR 速度**：CPU 上约 10–15 分钟；默认在 5000 样本子集上调参。
-3. **PyTorch**：研究线默认 `--device cpu`；若 GPU 驱动过旧，请保持 CPU 模式。
-4. **随机性**：划分与选芯固定 `random_state=42`；Fusion 集成使用 seeds `42, 43, 44`。
+1. **内存**：特征提取流式处理，正常运行 < 2 GB。
+2. **PyTorch**：默认 `--device cpu`；GPU 驱动过旧时请保持 CPU 模式。
+3. **随机性**：Strategy D 划分固定 `random_state=42`；Fusion 集成 seeds `42, 43, 44`。
+4. **数据重建**：序列维度变更或 CC 过滤更新后，需 `--rebuild-data` 重建缓存。
 
 ---
 

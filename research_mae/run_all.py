@@ -22,28 +22,22 @@ from research_mae.evaluate import (
     save_metrics,
     save_results_summary,
 )
-from research_mae.figures import (
-    fig1_relaxation_delta_v,
-    fig2_cc_charge_time,
-    fig3_mae_reconstruction,
-    fig4_latent_manifold,
-    fig5_attention_by_condition,
-    fig5_attention_weights,
-    fig6_capacity_prediction,
-    fig7_transfer_comparison,
-)
+from research_mae.thesis_figures import generate_all_figures
+from research_mae.export_features import export_all
 from research_mae.models import infer_latent
-from research_mae.plot_training import plot_all_training_histories, plot_training_overview
 from research_mae.train import _holdout_cell_indices, load_fusion, load_mae, train_fusion, train_mae
 from research_mae.training_log import TrainHistory
 from research_mae.transfer_fusion import run_d2_transfer_tl
+
+SEQ_SHORT = 32
+SEQ_LONG = 64
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--rebuild-data", action="store_true")
-    p.add_argument("--epochs-mae", type=int, default=60)
-    p.add_argument("--epochs-fusion", type=int, default=120)
+    p.add_argument("--epochs-mae", type=int, default=80)
+    p.add_argument("--epochs-fusion", type=int, default=150)
     p.add_argument("--device", default="cpu", help="cpu or cuda")
     p.add_argument("--skip-train", action="store_true")
     p.add_argument("--fusion-seeds", default="42,43,44", help="Comma-separated seeds for D1 ensemble")
@@ -70,17 +64,17 @@ def main():
 
     if not args.skip_train:
         if args.skip_mae:
-            model_short = load_mae("short", 30, device=device)
-            model_long = load_mae("long", 60, device=device)
+            model_short = load_mae("short", SEQ_SHORT, device=device)
+            model_long = load_mae("long", SEQ_LONG, device=device)
         else:
-            print("\n=== Step 2: Train MAE ===")
+            print("\n=== Step 2: Train MS-CNN MAE ===")
             dv_short = np.vstack([d1["delta_v"], d2["delta_v"]])
             cells_short = np.concatenate([d1["cell_id"], d2["cell_id"]])
             model_short, h1 = train_mae(
-                dv_short, 30, "short", args.epochs_mae, cell_ids=cells_short, device=device
+                dv_short, SEQ_SHORT, "short", args.epochs_mae, cell_ids=cells_short, device=device
             )
             model_long, h2 = train_mae(
-                d3["delta_v"], 60, "long", args.epochs_mae, cell_ids=d3["cell_id"], device=device
+                d3["delta_v"], SEQ_LONG, "long", args.epochs_mae, cell_ids=d3["cell_id"], device=device
             )
             histories.extend([h1, h2])
 
@@ -112,8 +106,8 @@ def main():
         )
         histories.append(hf3)
     else:
-        model_short = load_mae("short", 30, device=device)
-        model_long = load_mae("long", 60, device=device)
+        model_short = load_mae("short", SEQ_SHORT, device=device)
+        model_long = load_mae("long", SEQ_LONG, device=device)
         histories = [
             TrainHistory.load(p)
             for p in sorted((Path(__file__).parent / "output").glob("history_*.json"))
@@ -186,31 +180,18 @@ def main():
     summary_path = save_results_summary(all_metrics)
     print(f"  Summary: {summary_path}")
 
-    print("\n=== Step 7: Training curves ===")
-    if histories:
-        for p in plot_all_training_histories(histories):
-            print(f"  {p}")
-        print(f"  {plot_training_overview(histories)}")
+    print("\n=== Step 7: Export fused features (.npy) ===")
+    export_all(
+        {1: d1, 2: d2, 3: d3},
+        model_short,
+        model_long,
+        {1: (fusion_d1, stats_ds1), 2: (fusion_d2, stats_ds2), 3: (fusion_d3, stats_ds3)},
+        device=device,
+    )
 
-    print("\n=== Step 8: Result figures ===")
-    fig1_relaxation_delta_v()
-    fig2_cc_charge_time(1)
-    fig2_cc_charge_time(2)
-    for fn in (fig3_mae_reconstruction, fig4_latent_manifold):
-        for p in fn(model_short, model_long, device):
-            print(f"  {p}")
-    print(f"  {fig5_attention_weights(model_short, fusion_d1, stats_ds1, device)}")
-    print(f"  {fig5_attention_by_condition(model_short, fusion_d1, stats_ds1, device)}")
-    print(f"  {fig6_capacity_prediction(eval_data['y_test'], eval_data['pred_fusion'])}")
-    # Fig7: compare D2 modes + D3
-    fig7_transfer = {
-        "dataset_2": {
-            "fusion_rmse_pct": transfer["dataset_2_tl"]["tl_finetune_rmse_pct"],
-            "latent_ridge_rmse_pct": transfer["dataset_2_zero_shot"]["latent_ridge_rmse_pct"],
-        },
-        "dataset_3": transfer["dataset_3"],
-    }
-    print(f"  {fig7_transfer_comparison(fig7_transfer)}")
+    print("\n=== Step 8: Thesis figures (Fig 1–5) ===")
+    for p in generate_all_figures(model_short, model_long, device):
+        print(f"  {p}")
     print("\nDone.")
 
 

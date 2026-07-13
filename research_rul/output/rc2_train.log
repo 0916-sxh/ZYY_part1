@@ -1,0 +1,15 @@
+Device: cpu
+
+=== RUL label statistics (Dataset 1) ===
+  {'n_cells': 66, 'n_censored': 10, 'n_reached_eol': 56, 'n_valid_samples': 20423}
+
+=== Train main Quantile TCN (D1, fused features) ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/torch/autograd/graph.py:979: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 12080). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  [RUL-fused] ep 1/30  RMSE=38.3  PICP=0.474
+  [RUL-fused] ep 10/30  RMSE=34.1  PICP=0.436
+  [RUL-fused] ep 20/30  RMSE=32.9  PICP=0.409
+  [RUL-fused] ep 30/30  RMSE=33.0  PICP=0.328
+
+=== Ablation (Fig 7) ===
+  [RUL-latent] ep 1/20  RMSE=44.3  PICP=0.494

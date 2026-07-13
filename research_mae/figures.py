@@ -18,7 +18,7 @@ from research_mae.data_extract import (
     load_dataset,
 )
 from research_mae.evaluate import cell_to_condition, prepare_cc_tensor
-from research_mae.models import GatedChannelFusion, TemporalMaskedAE, infer_latent
+from research_mae.models import GatedChannelFusion, MSCNNMaskedAE, infer_latent
 
 FIG_DIR = Path(__file__).resolve().parent / "figures"
 
@@ -106,7 +106,7 @@ def fig2_cc_charge_time(dataset_id: int = 1, cell_id: str | None = None) -> Path
 
 
 @torch.no_grad()
-def _reconstruct(model: TemporalMaskedAE, seq: np.ndarray, device: str) -> tuple:
+def _reconstruct(model: MSCNNMaskedAE, seq: np.ndarray, device: str) -> tuple:
     x = torch.from_numpy(seq).float().unsqueeze(0).unsqueeze(0).to(device)
     masked, mask = model.random_mask(x)
     z = model.encode(masked)
@@ -131,8 +131,8 @@ def _pick_lifecycle_cycles(cycles: np.ndarray) -> tuple[list[int], list[str]]:
 
 
 def fig3_mae_reconstruction(
-    model_short: TemporalMaskedAE,
-    model_long: TemporalMaskedAE,
+    model_short: MSCNNMaskedAE,
+    model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> list[Path]:
     paths = []
@@ -184,8 +184,8 @@ def fig3_mae_reconstruction(
 
 
 def fig4_latent_manifold(
-    model_short: TemporalMaskedAE,
-    model_long: TemporalMaskedAE,
+    model_short: MSCNNMaskedAE,
+    model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> list[Path]:
     paths = []
@@ -234,7 +234,7 @@ def fig4_latent_manifold(
 
 
 def fig5_attention_weights(
-    model_short: TemporalMaskedAE,
+    model_short: MSCNNMaskedAE,
     fusion: GatedChannelFusion,
     stats: dict,
     device: str = "cpu",
@@ -263,12 +263,12 @@ def fig5_attention_weights(
     cyc = cycles[order]
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(cyc, w[:, 0], "o-", ms=3, lw=1.5, label="Relaxation gate")
-    ax.plot(cyc, w[:, 1], "s-", ms=3, lw=1.5, label="CC feature gate")
+    ax.plot(cyc, w[:, 0], "o-", ms=3, lw=1.5, label="Relaxation attention")
+    ax.plot(cyc, w[:, 1], "s-", ms=3, lw=1.5, label="CC feature attention")
     ax.set_xlabel("Cycle number")
-    ax.set_ylabel("Gate weight (normalized)")
+    ax.set_ylabel("Attention weight")
     ax.set_ylim(0, 1)
-    ax.set_title(f"Fig 5 – Gated fusion vs aging ({cell_id})")
+    ax.set_title(f"Fig 5 – Channel attention vs aging ({cell_id})")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -276,7 +276,7 @@ def fig5_attention_weights(
 
 
 def fig5_attention_by_condition(
-    model_short: TemporalMaskedAE,
+    model_short: MSCNNMaskedAE,
     fusion: GatedChannelFusion,
     stats: dict,
     device: str = "cpu",
@@ -306,8 +306,8 @@ def fig5_attention_by_condition(
         ax.plot(grp["cycle"], grp["w1"], lw=1.5, ls="--", alpha=0.7)
 
     ax.set_xlabel("Cycle number (binned mean)")
-    ax.set_ylabel("Gate weight")
-    ax.set_title("Fig 5b – Gates by C-rate condition")
+    ax.set_ylabel("Attention weight")
+    ax.set_title("Fig 5b – Channel attention by C-rate condition")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(alpha=0.3)
     fig.tight_layout()

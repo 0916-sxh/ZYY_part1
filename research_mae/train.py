@@ -20,7 +20,7 @@ from research_mae.features import (
 from research_mae.models import (
     CapacityHead,
     GatedChannelFusion,
-    TemporalMaskedAE,
+    MSCNNMaskedAE,
     train_mae_epoch,
 )
 from research_mae.training_log import TrainHistory
@@ -44,7 +44,7 @@ def _holdout_cell_indices(cell_ids: np.ndarray, val_frac: float = 0.15, seed: in
 
 
 @torch.no_grad()
-def _mae_val_loss(model: TemporalMaskedAE, loader: DataLoader, device: str) -> float:
+def _mae_val_loss(model: MSCNNMaskedAE, loader: DataLoader, device: str) -> float:
     model.eval()
     total, n = 0.0, 0
     for batch in loader:
@@ -66,10 +66,10 @@ def train_mae(
     latent_dim: int = 32,
     cell_ids: np.ndarray | None = None,
     device: str = "cpu",
-    patience: int = 12,
-) -> tuple[TemporalMaskedAE, TrainHistory]:
+    patience: int = 15,
+) -> tuple[MSCNNMaskedAE, TrainHistory]:
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    model = TemporalMaskedAE(seq_len=seq_len, latent_dim=latent_dim, mask_ratio=0.3)
+    model = MSCNNMaskedAE(seq_len=seq_len, latent_dim=latent_dim, mask_ratio=0.3)
     model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
@@ -173,10 +173,10 @@ def train_fusion(
     name: str,
     dataset_id: int = 1,
     split_mode: str = "strategy_d",
-    epochs: int = 100,
+    epochs: int = 150,
     latent_dim: int = 32,
     device: str = "cpu",
-    patience: int = 18,
+    patience: int = 25,
     seed: int = 42,
 ) -> tuple[GatedChannelFusion, CapacityHead, dict, TrainHistory]:
     torch.manual_seed(seed)
@@ -217,7 +217,7 @@ def train_fusion(
     fusion = GatedChannelFusion(latent_dim=latent_dim, cc_feat_dim=2).to(device)
     head = CapacityHead(latent_dim=latent_dim, cc_feat_dim=2, dropout=0.03).to(device)
     opt = torch.optim.AdamW(
-        list(fusion.parameters()) + list(head.parameters()), lr=8e-4, weight_decay=5e-5
+        list(fusion.parameters()) + list(head.parameters()), lr=6e-4, weight_decay=1e-4
     )
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     loss_fn = nn.SmoothL1Loss(beta=0.02)
@@ -308,7 +308,7 @@ def train_fusion(
     return fusion, head, stats, history
 
 
-def load_mae(name: str, seq_len: int, latent_dim: int = 32, device: str = "cpu") -> TemporalMaskedAE:
+def load_mae(name: str, seq_len: int, latent_dim: int = 32, device: str = "cpu") -> MSCNNMaskedAE:
     path = CKPT_DIR / f"mae_{name}.pt"
     ckpt = torch.load(path, map_location=device, weights_only=False)
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
@@ -316,7 +316,7 @@ def load_mae(name: str, seq_len: int, latent_dim: int = 32, device: str = "cpu")
         state = ckpt["state_dict"]
     else:
         state = ckpt
-    model = TemporalMaskedAE(seq_len=seq_len, latent_dim=latent_dim)
+    model = MSCNNMaskedAE(seq_len=seq_len, latent_dim=latent_dim)
     model.load_state_dict(state)
     model.to(device)
     model.eval()
