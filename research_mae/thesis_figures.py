@@ -1,4 +1,4 @@
-"""Thesis-style Fig 1–5 and Fig 10 for research content 1."""
+"""Thesis-style Fig 1–5 and Fig 10–11 for research content 1."""
 
 from __future__ import annotations
 
@@ -202,85 +202,137 @@ def fig3_mae_reconstruction(
     return _save(fig, "fig3_mae_reconstruction.png")
 
 
+def _life_ratio_array(cycles: np.ndarray, cell_ids: np.ndarray) -> np.ndarray:
+    life = np.zeros_like(cycles, dtype=np.float64)
+    for cell in np.unique(cell_ids):
+        m = cell_ids == cell
+        c = cycles[m]
+        life[m] = c / max(c.max(), 1.0)
+    return life
+
+
+def _population_aging_embedding(
+    ds_id: int,
+    model: MSCNNMaskedAE,
+    device: str,
+    max_points: int = 3000,
+) -> tuple[np.ndarray, np.ndarray, float, str]:
+    """Return (embedding, life_ratio, spearman_rho, title_suffix) for population panel."""
+    from sklearn.linear_model import LinearRegression
+
+    d = load_dataset(ds_id)
+    x = torch.from_numpy(d["delta_v"]).unsqueeze(1)
+    z = infer_latent(model, x, device).numpy()
+    cycles = d["cycle"].astype(np.float64)
+    life = _life_ratio_array(cycles, d["cell_id"])
+
+    n = len(z)
+    idx = np.linspace(0, n - 1, min(n, max_points), dtype=int)
+    z_sub, life_sub = z[idx], life[idx]
+
+    model.eval()
+    with torch.no_grad():
+        age = (
+            model.predict_aging(torch.from_numpy(z_sub).to(device))
+            .detach()
+            .cpu()
+            .numpy()
+            .astype(np.float64)
+        )
+    resid = z_sub - LinearRegression().fit(age[:, None], z_sub).predict(age[:, None])
+    dim2 = (
+        PCA(n_components=1, random_state=42).fit_transform(resid).ravel()
+        if resid.shape[0] > 2
+        else np.zeros(len(age))
+    )
+    emb = np.column_stack([age, dim2])
+
+    rho = float(spearmanr(life_sub, emb[:, 0]).correlation)
+    if rho < 0:
+        emb[:, 0] *= -1.0
+        rho = -rho
+
+    x_lo, x_hi = np.percentile(emb[:, 0], [0.5, 99.5])
+    y_lo, y_hi = np.percentile(emb[:, 1], [0.5, 99.5])
+    x_pad = 0.05 * max(x_hi - x_lo, 1e-3)
+    y_pad = 0.05 * max(y_hi - y_lo, 1e-3)
+    keep = (
+        (emb[:, 0] >= x_lo - x_pad)
+        & (emb[:, 0] <= x_hi + x_pad)
+        & (emb[:, 1] >= y_lo - y_pad)
+        & (emb[:, 1] <= y_hi + y_pad)
+    )
+    limits = (x_lo - x_pad, x_hi + x_pad, y_lo - y_pad, y_hi + y_pad)
+    return emb[keep], life_sub[keep], rho, limits
+
+
+def _single_cell_trajectory_embedding(
+    ds_id: int,
+    model: MSCNNMaskedAE,
+    device: str,
+    cell_id: str | None = None,
+    max_points: int = 800,
+) -> tuple[np.ndarray, np.ndarray, float, str, np.ndarray]:
+    """Return (embedding, cycle_colors, spearman_rho, cell_id, cycle_order_idx)."""
+    d = load_dataset(ds_id)
+    if cell_id is None:
+        cell_id = _pick_long_life_cell(ds_id, 300 if ds_id == 3 else 400)
+
+    m = d["cell_id"] == cell_id
+    order = np.argsort(d["cycle"][m])
+    idxs = np.where(m)[0][order]
+    if len(idxs) > max_points:
+        pick = np.linspace(0, len(idxs) - 1, max_points, dtype=int)
+        idxs = idxs[pick]
+        order = np.arange(len(idxs))
+
+    x = torch.from_numpy(d["delta_v"][idxs]).unsqueeze(1)
+    z = infer_latent(model, x, device).numpy()
+    cycles = d["cycle"][idxs].astype(np.float64)
+
+    if len(z) > 50:
+        emb = TSNE(
+            n_components=2,
+            perplexity=min(30, max(5, len(z) // 4)),
+            random_state=42,
+            max_iter=1500,
+            init="pca",
+            learning_rate="auto",
+        ).fit_transform(z)
+    else:
+        emb = PCA(n_components=2, random_state=42).fit_transform(z)
+
+    rho = float(spearmanr(cycles, emb[:, 0]).correlation)
+    if rho < 0:
+        emb[:, 0] *= -1.0
+        rho = -rho
+
+    return emb, cycles, rho, str(cell_id), order
+
+
 def fig4_latent_manifold(
     model_short: MSCNNMaskedAE,
     model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> Path:
-    """Fig 4 (a/b/c): aging-axis projection of latent + residual PC.
-
-    Dim-1 is the MAE aging-head score (trained to track capacity fade /
-    within-cell life progress). Dim-2 is the leading PC of the residual
-    latent after removing the aging direction. Spearman is vs life ratio.
-    """
-    from sklearn.linear_model import LinearRegression
-
+    """Fig 4 (a/b/c): population aging-axis projection per dataset."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
     rhos = []
 
     for ax, (ds_id, model) in zip(
         axes, ((1, model_short), (2, model_short), (3, model_long))
     ):
-        d = load_dataset(ds_id)
-        x = torch.from_numpy(d["delta_v"]).unsqueeze(1)
-        z = infer_latent(model, x, device).numpy()
-        cycles = d["cycle"].astype(np.float64)
-        cells = d["cell_id"]
-        life = np.zeros_like(cycles)
-        for cell in np.unique(cells):
-            m = cells == cell
-            c = cycles[m]
-            life[m] = c / max(c.max(), 1.0)
-
-        n = len(z)
-        idx = np.linspace(0, n - 1, min(n, 3000), dtype=int)
-        z_sub, life_sub = z[idx], life[idx]
-
-        model.eval()
-        with torch.no_grad():
-            age = (
-                model.predict_aging(torch.from_numpy(z_sub).to(device))
-                .detach()
-                .cpu()
-                .numpy()
-                .astype(np.float64)
-            )
-        # Dim2: residual structure orthogonal to the aging score
-        resid = z_sub - LinearRegression().fit(age[:, None], z_sub).predict(age[:, None])
-        if resid.shape[0] > 2:
-            dim2 = PCA(n_components=1, random_state=42).fit_transform(resid).ravel()
-        else:
-            dim2 = np.zeros(len(age))
-        emb = np.column_stack([age, dim2])
-
-        rho = float(spearmanr(life_sub, emb[:, 0]).correlation)
-        if rho < 0:
-            emb[:, 0] *= -1.0
-            rho = -rho
+        emb, life, rho, limits = _population_aging_embedding(ds_id, model, device)
         rhos.append(rho)
-
-        # Robust display: outlier aging scores must not crush the main cloud
-        x_lo, x_hi = np.percentile(emb[:, 0], [0.5, 99.5])
-        y_lo, y_hi = np.percentile(emb[:, 1], [0.5, 99.5])
-        # pad a little
-        x_pad = 0.05 * max(x_hi - x_lo, 1e-3)
-        y_pad = 0.05 * max(y_hi - y_lo, 1e-3)
-        keep = (
-            (emb[:, 0] >= x_lo - x_pad)
-            & (emb[:, 0] <= x_hi + x_pad)
-            & (emb[:, 1] >= y_lo - y_pad)
-            & (emb[:, 1] <= y_hi + y_pad)
-        )
-        emb_p, life_p = emb[keep], life_sub[keep]
-
-        sc = ax.scatter(emb_p[:, 0], emb_p[:, 1], c=life_p, cmap="viridis", s=8, alpha=0.55)
-        ax.set_xlim(x_lo - x_pad, x_hi + x_pad)
-        ax.set_ylim(y_lo - y_pad, y_hi + y_pad)
+        x0, x1, y0, y1 = limits
+        sc = ax.scatter(emb[:, 0], emb[:, 1], c=life, cmap="viridis", s=8, alpha=0.55)
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y0, y1)
         fig.colorbar(sc, ax=ax, label="Life ratio")
         ax.set_xlabel("Dim 1 (learned aging axis)")
         ax.set_ylabel("Dim 2 (residual PC)")
         ax.set_title(
-            f"({PANEL_LABELS[ds_id - 1]}) Dataset {ds_id}  (Spearman={rho:.3f}, n={len(emb_p)})"
+            f"({PANEL_LABELS[ds_id - 1]}) Dataset {ds_id}  (Spearman={rho:.3f}, n={len(emb)})"
         )
 
     fig.suptitle(
@@ -290,6 +342,67 @@ def fig4_latent_manifold(
     )
     fig.tight_layout()
     return _save(fig, "fig4_latent_manifold.png")
+
+
+def fig11_manifold_trajectory_combo(
+    model_short: MSCNNMaskedAE,
+    model_long: MSCNNMaskedAE,
+    device: str = "cpu",
+) -> Path:
+    """Fig 11: (a) single-cell t-SNE trajectory + (b) population aging-axis projection.
+
+    Layout: 2 rows × 3 columns (D1 / D2 / D3).
+    Row (a): one long-life cell per dataset, points colored by cycle with trajectory lines.
+    Row (b): same population embedding as Fig 4 for cross-cell aging validation.
+    """
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8.5))
+    pop_rhos, cell_rhos = [], []
+
+    for col, (ds_id, model) in enumerate(((1, model_short), (2, model_short), (3, model_long))):
+        # (a) single-cell trajectory
+        ax_a = axes[0, col]
+        emb, cycles, rho_c, cell, _ = _single_cell_trajectory_embedding(
+            ds_id, model, device
+        )
+        cell_rhos.append(rho_c)
+        sc = ax_a.scatter(
+            emb[:, 0], emb[:, 1], c=cycles, cmap="viridis", s=14, alpha=0.85, zorder=3
+        )
+        ax_a.plot(emb[:, 0], emb[:, 1], color="gray", alpha=0.25, lw=0.8, zorder=2)
+        fig.colorbar(sc, ax=ax_a, label="Cycle")
+        ax_a.set_xlabel("t-SNE Dim 1")
+        ax_a.set_ylabel("t-SNE Dim 2")
+        ax_a.set_title(
+            f"Dataset {ds_id}  (a) {cell}\nSpearman={rho_c:.3f}, n={len(emb)}"
+        )
+
+        # (b) population aging axis
+        ax_b = axes[1, col]
+        emb_p, life, rho_p, limits = _population_aging_embedding(ds_id, model, device)
+        pop_rhos.append(rho_p)
+        x0, x1, y0, y1 = limits
+        sc2 = ax_b.scatter(emb_p[:, 0], emb_p[:, 1], c=life, cmap="viridis", s=8, alpha=0.55)
+        ax_b.set_xlim(x0, x1)
+        ax_b.set_ylim(y0, y1)
+        fig.colorbar(sc2, ax=ax_b, label="Life ratio")
+        ax_b.set_xlabel("Dim 1 (learned aging axis)")
+        ax_b.set_ylabel("Dim 2 (residual PC)")
+        ax_b.set_title(
+            f"Dataset {ds_id}  (b) population\nSpearman={rho_p:.3f}, n={len(emb_p)}"
+        )
+
+    fig.text(0.02, 0.73, "(a) Single-cell trajectory", rotation=90, va="center", fontsize=11)
+    fig.text(0.02, 0.28, "(b) Population aging axis", rotation=90, va="center", fontsize=11)
+    fig.suptitle(
+        "Fig 11 – Latent manifold: single-cell trajectory vs population aging projection\n"
+        + "Single-cell: "
+        + "  |  ".join(f"D{i+1} ρ={r:.3f}" for i, r in enumerate(cell_rhos))
+        + "    Population: "
+        + "  |  ".join(f"D{i+1} ρ={r:.3f}" for i, r in enumerate(pop_rhos)),
+        y=1.02,
+    )
+    fig.tight_layout(rect=[0.03, 0, 1, 0.96])
+    return _save(fig, "fig11_manifold_trajectory_combo.png")
 
 
 def _life_ratio(cycles: np.ndarray, cmax: float) -> np.ndarray:
@@ -468,7 +581,7 @@ def fig10_cycle_protocol(
 
 
 def generate_all_figures(model_short, model_long, device: str = "cpu") -> list[Path]:
-    """Generate thesis Fig 1–5 and Fig 10."""
+    """Generate thesis Fig 1–5, Fig 10–11."""
     cell = _pick_long_life_cell(1, 500)
     paths = [
         fig1_relaxation_voltage(cell_id=cell, cycle_step=20),
@@ -477,6 +590,7 @@ def generate_all_figures(model_short, model_long, device: str = "cpu") -> list[P
         fig4_latent_manifold(model_short, model_long, device),
         fig5_channel_attention(model_short, model_long, device),
         fig10_cycle_protocol(),
+        fig11_manifold_trajectory_combo(model_short, model_long, device),
     ]
     return paths
 

@@ -69,7 +69,18 @@ def _holdout_cell_indices(cell_ids: np.ndarray, val_frac: float = 0.15, seed: in
 
 
 @torch.no_grad()
-def _mae_val_loss(model: MSCNNMaskedAE, loader: DataLoader, device: str) -> float:
+def _mae_val_loss(
+    model: MSCNNMaskedAE,
+    loader: DataLoader,
+    device: str,
+    *,
+    include_aging: bool = False,
+) -> float:
+    """Validation metric for early-stop: reconstruction only by default.
+
+    Aging loss is excluded from checkpoint selection so a strong aging head
+    cannot overwrite a good decoder (Fig 3 regression fix).
+    """
     model.eval()
     total, n = 0.0, 0
     for batch in loader:
@@ -80,12 +91,60 @@ def _mae_val_loss(model: MSCNNMaskedAE, loader: DataLoader, device: str) -> floa
         mse_m = ((recon - x) ** 2 * (1.0 - mask)).sum() / (1.0 - mask).sum().clamp(min=1.0)
         mse_v = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
         mse = 0.85 * mse_m + 0.15 * mse_v
-        if len(batch) > 1 and "aging" in out:
+        if include_aging and len(batch) > 1 and "aging" in out:
             aging_t = batch[1].to(device)
             mse = mse + 0.25 * nn.functional.smooth_l1_loss(out["aging"], aging_t)
         total += float(mse.item()) * x.size(0)
         n += x.size(0)
     return total / max(n, 1)
+
+
+def _fine_tune_aging_head(
+    model: MSCNNMaskedAE,
+    delta_v: np.ndarray,
+    aging: np.ndarray,
+    device: str,
+    epochs: int = 40,
+    lr: float = 1e-3,
+    lambda_rank: float = 0.3,
+) -> None:
+    """Train only ``aging_head`` on clean (unmasked) latents.
+
+    Freezes encoder/decoder so reconstruction quality is preserved exactly,
+    while Spearman aging-axis alignment is still strengthened.
+    """
+    from research_mae.models import pairwise_ranking_loss
+
+    for p in model.parameters():
+        p.requires_grad = False
+    for p in model.aging_head.parameters():
+        p.requires_grad = True
+
+    opt = torch.optim.AdamW(model.aging_head.parameters(), lr=lr, weight_decay=1e-4)
+    loader = _loader(delta_v, aging, batch_size=256, shuffle=True)
+    model.train()
+    # Keep BN/Dropout frozen for deterministic encode; aging_head has neither
+    model.eval()
+    for ep in range(1, epochs + 1):
+        total, n = 0.0, 0
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            with torch.no_grad():
+                z = model.encode(x)
+            pred = model.predict_aging(z)
+            loss = nn.functional.smooth_l1_loss(pred, y)
+            loss = loss + lambda_rank * pairwise_ranking_loss(pred, y)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total += float(loss.item()) * x.size(0)
+            n += x.size(0)
+        if ep % 10 == 0 or ep == 1:
+            print(f"    aging-head FT epoch {ep}/{epochs}  loss={total / max(n, 1):.4f}")
+
+    for p in model.parameters():
+        p.requires_grad = True
 
 
 def train_mae(
@@ -168,21 +227,20 @@ def train_mae(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+        print(f"  [{name}] restored best recon checkpoint  val={best_val:.6f}")
 
-    # Short aging-focused fine-tune to strengthen the monotonic aging axis
+    # Aging fine-tune: ONLY aging_head (encoder/decoder frozen) → keep Fig 3
     if aging is not None and lambda_aging > 0:
-        print(f"  [{name}] aging fine-tune (20 epochs)…")
-        ft_loader = _loader(delta_v, aging, batch_size=128, shuffle=True)
-        opt_ft = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
-        for ep in range(1, 21):
-            train_mae_epoch(
-                model,
-                ft_loader,
-                opt_ft,
-                device,
-                lambda_aging=max(lambda_aging, 0.7),
-                lambda_rank=max(lambda_rank, 0.3),
-            )
+        print(f"  [{name}] aging-head fine-tune (frozen encoder/decoder)…")
+        _fine_tune_aging_head(
+            model,
+            delta_v,
+            aging,
+            device,
+            epochs=40,
+            lr=1e-3,
+            lambda_rank=max(lambda_rank, 0.3),
+        )
 
     torch.save({"state_dict": model.state_dict(), "latent_dim": latent_dim}, CKPT_DIR / f"mae_{name}.pt")
     history.save()

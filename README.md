@@ -30,7 +30,7 @@
 │   ├── models.py               # Hybrid Dilated MS-CNN MAE + 门控融合
 │   ├── cc_filter.py            # D1 CC 突变剔除
 │   ├── features/               # dataset_*_fused.npy
-│   ├── figures/                # Fig 1–5、Fig 10
+│   ├── figures/                # Fig 1–5、Fig 10–11
 │   └── RESEARCH_CONTENT_1.md   # 详细说明
 ├── research_rul/               # 研究内容二
 │   ├── run_all.py              # Quantile TCN + Fig 6–9
@@ -112,14 +112,14 @@ python research_rul/run_all.py --figures-only --device cuda
 
 | 方法 | Test RMSE% | R² |
 |------|------------|-----|
-| **D1 集成（5 seeds）** | **0.43%** | 0.995 |
-| D1 单模型 | 0.50% | 0.993 |
-| Latent Ridge | 2.65% | 0.800 |
+| **D1 集成（5 seeds）** | **0.47%** | 0.994 |
+| D1 单模型 | 0.52% | 0.992 |
+| Latent Ridge | 2.40% | 0.837 |
 | 论文 SVR 基线 | ~1.02% | — |
 | D2 原生留出 | **0.23%** | 0.998 |
-| D3 原生留出 | **0.60%** | 0.996 |
+| D3 原生留出 | **0.54%** | 0.996 |
 
-### 图表（Fig 1–5、Fig 10）
+### 图表（Fig 1–5、Fig 10–11）
 
 #### Fig 1 — 弛豫电压（Dataset 1，每隔 20 圈一条，蓝→红渐变）
 
@@ -137,7 +137,7 @@ python research_rul/run_all.py --figures-only --device cuda
 
 | Dataset 1 | Dataset 2 | Dataset 3 |
 |-----------|-----------|-----------|
-| **ρ = 0.893** | **ρ = 0.840** | **ρ = 0.993** |
+| **ρ = 0.894** | **ρ = 0.843** | **ρ = 0.991** |
 
 - Dim 1 = MAE `aging_head` 输出（Sigmoid ∈ [0,1]）
 - Dim 2 = 去老化方向后残差的 PCA1
@@ -153,6 +153,12 @@ python research_rul/run_all.py --figures-only --device cuda
 #### Fig 10 — NCA @ 45°C、0.5C 整圈协议曲线（CC→CV→静置→放电）
 
 ![Fig 10](research_mae/figures/fig10_cycle_protocol_nca_cy45.png)
+
+#### Fig 11 — 隐空间流形：单电芯轨迹 (a) + 全数据集老化轴投影 (b)
+
+2×3 布局：上行每数据集选一部长寿命电芯，t-SNE 展示圈序连续轨迹；下行与 Fig 4 相同的全数据老化轴投影。
+
+![Fig 11](research_mae/figures/fig11_manifold_trajectory_combo.png)
 
 详细说明：[research_mae/RESEARCH_CONTENT_1.md](research_mae/RESEARCH_CONTENT_1.md)
 

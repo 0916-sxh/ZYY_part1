@@ -209,7 +209,7 @@ def main():
         device=device,
     )
 
-    print("\n=== Step 8: Thesis figures (Fig 1–5) ===")
+    print("\n=== Step 8: Thesis figures (Fig 1–5, Fig 10–11) ===")
     for p in generate_all_figures(model_short, model_long, device):
         print(f"  {p}")
     print("\nDone.")

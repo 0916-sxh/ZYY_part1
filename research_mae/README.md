@@ -6,7 +6,7 @@
 2. **Hybrid Dilated MS-CNN 掩码自编码器** + **aging head** 老化轴监督  
 3. **门控通道融合** 融合弛豫隐向量与 CC 充电时间  
 4. 导出 `.npy` 融合特征（供研究内容二/三使用）  
-5. 生成论文规格 **Fig 1–5、Fig 10**（`thesis_figures.py`）
+5. 生成论文规格 **Fig 1–5、Fig 10–11**（`thesis_figures.py`）
 
 **完整说明** → [RESEARCH_CONTENT_1.md](./RESEARCH_CONTENT_1.md)
 
@@ -20,7 +20,7 @@ cd /path/to/data-driven-capacity-estimation-from-voltage-relaxation
 # 完整训练 + 导出 + 出图（GPU）
 python research_mae/run_all.py --device cuda --fusion-seeds 42,43,44,45,46
 
-# 仅重画 Fig 1–5、Fig 10
+# 仅重画 Fig 1–5、Fig 10–11
 python research_mae/thesis_figures.py --device cuda
 ```
 
@@ -30,7 +30,7 @@ python research_mae/thesis_figures.py --device cuda
 |------|------|
 | `models.py` | `MSCNNMaskedAE`（Hybrid Dilated MS-CNN + aging head）+ `GatedChannelFusion` |
 | `train.py` | MAE 老化监督训练 + Fusion 训练 |
-| `thesis_figures.py` | 论文规格 Fig 1–5、Fig 10（Fig 4 = 老化轴流形） |
+| `thesis_figures.py` | 论文规格 Fig 1–5、Fig 10–11（Fig 4/11 = 老化流形） |
 | `export_features.py` | 导出 `features/dataset_*_fused.npy` |
 | `run_all.py` | 训练 + 评估 + 导出 + 出图 |
 
@@ -38,8 +38,8 @@ python research_mae/thesis_figures.py --device cuda
 
 | 指标 | D1 | D2 | D3 |
 |------|----|----|-----|
-| Fusion RMSE% | **0.43** | **0.23** | **0.60** |
-| Fig 4 Spearman ρ | **0.893** | **0.840** | **0.993** |
+| Fusion RMSE% | **0.47** | **0.23** | **0.54** |
+| Fig 4 Spearman ρ | **0.894** | **0.843** | **0.991** |
 
 ## 文档索引
 

@@ -78,8 +78,9 @@
 
 1. `_aging_targets()`：`0.55×fade + 0.45×life_ratio`（电芯内 cycle 归一化）
 2. `aging_head` 预测该目标；损失 = SmoothL1 + `pairwise_ranking_loss`（batch 内保序）
-3. MAE 收敛后 **20 epoch 老化微调**（加大 λ_aging）
+3. MAE 收敛后 **40 epoch aging-head 微调**（**冻结 encoder/decoder**，只训 `aging_head`）
 4. **Sigmoid 输出层**：将 aging 分数限制在 [0,1]，避免离群值撑爆 Fig 4 坐标轴
+5. **early-stop 仅看重构 val_loss**（不含 aging），防止老化损失抢走 best checkpoint
 
 **Fig 4 投影**（`thesis_figures.py`，非 t-SNE）：
 
@@ -216,15 +217,18 @@ research_mae/
 
 ---
 
-## 十四、继续优化（第八轮 — 老化轴 + Fig 4）
+## 十四、继续优化（第八轮 — 老化轴 + Fig 4；第九轮均衡）
 
 1. **Hybrid Dilated MS-CNN**：kernel 3/5/7 + dilation 2/4 + 残差；Avg+Max 双池化
-2. **aging head + 半监督**：SOH/寿命比率目标 + 排序损失 + 20 epoch 微调；Sigmoid 限幅
-3. **Fig 4 改法**：学习老化轴 + 残差 PC（弃用 t-SNE 报 Spearman）；寿命比率着色；分位裁剪防离群
-4. **D1 集成扩至 5 seeds**（42–46）；融合 RMSE **0.43%**
-5. **Spearman 达标**：D1 **0.893**，D2 **0.840**，D3 **0.993**
+2. **aging head + 半监督**：SOH/寿命比率目标 + 排序损失；主训练后 **仅微调 aging_head**（冻结 encoder/decoder）；Sigmoid 限幅
+3. **防回归**：early-stop 只看重构 MSE；禁止全参数 aging 微调冲坏 Fig 3
+4. **Fig 4 改法**：学习老化轴 + 残差 PC（弃用 t-SNE 报 Spearman）；寿命比率着色；分位裁剪防离群
+5. **D1 集成扩至 5 seeds**（42–46）；均衡重训后融合 RMSE **0.47%**（D3 **0.54%**）
+6. **Spearman 达标**：D1 **0.894**，D2 **0.843**，D3 **0.991**（重构 MSE ~0.0005）
 
-**Debug 记录 — Fig 4 D1 “点很少”**：实为 ~3000 点被个别 aging 离群值（未 Sigmoid 前可达 20+）拉爆坐标轴；修复后云团正常铺满。
+**Debug 记录 — Fig 4 D1 “点很少”**：实为 ~3000 点被个别 aging 离群值（未 Sigmoid 前极值 20+）拉爆坐标轴；修复后云团正常铺满。
+
+**Debug 记录 — Fig 3 重构突然变差**：全参数 aging 微调把解码器冲坏（recon MSE ~0.002→~1.5）。改为只训 `aging_head` 后 Fig 3 恢复贴合，Spearman 仍 >0.84。
 
 ---
 

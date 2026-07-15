@@ -1,0 +1,98 @@
+Device: cuda
+
+=== Step 1: Extract & cache data ===
+
+=== Step 2: Train Hybrid Dilated MS-CNN MAE (aging-aware) ===
+  [short] epoch 1/80  train=0.053333  aging=0.0049  val=0.003514  lr=1.00e-03
+  [short] epoch 10/80  train=0.005048  aging=0.0036  val=0.003260  lr=9.62e-04
+  [short] epoch 20/80  train=0.004847  aging=0.0033  val=0.002039  lr=8.54e-04
+  [short] epoch 30/80  train=0.011075  aging=0.0031  val=0.001713  lr=6.91e-04
+  [short] epoch 40/80  train=0.010620  aging=0.0028  val=0.001119  lr=5.00e-04
+  [short] epoch 50/80  train=0.005853  aging=0.0027  val=0.010180  lr=3.09e-04
+  [short] epoch 60/80  train=0.003884  aging=0.0026  val=0.000939  lr=1.46e-04
+  [short] epoch 70/80  train=0.001363  aging=0.0025  val=0.000887  lr=3.81e-05
+  [short] epoch 80/80  train=0.000758  aging=0.0025  val=0.000823  lr=0.00e+00
+  [short] restored best recon checkpoint  val=0.000819
+  [short] aging-head fine-tune (frozen encoder/decoder)…
+    aging-head FT epoch 1/40  loss=0.0086
+    aging-head FT epoch 10/40  loss=0.0078
+    aging-head FT epoch 20/40  loss=0.0077
+    aging-head FT epoch 30/40  loss=0.0077
+    aging-head FT epoch 40/40  loss=0.0077
+  [long] epoch 1/80  train=0.053192  aging=0.0045  val=0.007525  lr=1.00e-03
+  [long] epoch 10/80  train=0.002470  aging=0.0013  val=0.001620  lr=9.62e-04
+  [long] epoch 20/80  train=0.001737  aging=0.0009  val=0.000746  lr=8.54e-04
+  [long] epoch 30/80  train=0.001313  aging=0.0008  val=0.000590  lr=6.91e-04
+  [long] early stop at epoch 34  best_val=0.000290
+  [long] restored best recon checkpoint  val=0.000290
+  [long] aging-head fine-tune (frozen encoder/decoder)…
+    aging-head FT epoch 1/40  loss=0.0032
+    aging-head FT epoch 10/40  loss=0.0025
+    aging-head FT epoch 20/40  loss=0.0021
+    aging-head FT epoch 30/40  loss=0.0020
+    aging-head FT epoch 40/40  loss=0.0019
+
+=== Step 3: Train fusion D1 ensemble (seeds=[42, 43, 44, 45, 46]) + D2/D3 ===
+  [fusion-ds1] epoch 1/150  train=0.368946  val_rmse=7.07%  w=(0.501,0.499)
+  [fusion-ds1] epoch 20/150  train=0.018242  val_rmse=0.82%  w=(0.459,0.541)
+  [fusion-ds1] epoch 40/150  train=0.011913  val_rmse=0.92%  w=(0.450,0.550)
+  [fusion-ds1] epoch 60/150  train=0.006381  val_rmse=0.85%  w=(0.444,0.556)
+  [fusion-ds1] epoch 80/150  train=0.003495  val_rmse=0.67%  w=(0.443,0.557)
+  [fusion-ds1] early stop at epoch 86  best_val_rmse=0.52%
+  [fusion-ds1] epoch 1/150  train=0.279709  val_rmse=5.82%  w=(0.507,0.493)
+  [fusion-ds1] epoch 20/150  train=0.013564  val_rmse=1.00%  w=(0.462,0.538)
+  [fusion-ds1] epoch 40/150  train=0.007753  val_rmse=0.65%  w=(0.445,0.555)
+  [fusion-ds1] epoch 60/150  train=0.003955  val_rmse=0.74%  w=(0.431,0.569)
+  [fusion-ds1] early stop at epoch 61  best_val_rmse=0.49%
+  [fusion-ds1] epoch 1/150  train=0.333206  val_rmse=3.48%  w=(0.511,0.489)
+  [fusion-ds1] epoch 20/150  train=0.015649  val_rmse=0.85%  w=(0.470,0.530)
+  [fusion-ds1] epoch 40/150  train=0.009230  val_rmse=0.63%  w=(0.448,0.552)
+  [fusion-ds1] early stop at epoch 48  best_val_rmse=0.51%
+  [fusion-ds1] epoch 1/150  train=0.452045  val_rmse=6.40%  w=(0.502,0.498)
+  [fusion-ds1] epoch 20/150  train=0.019535  val_rmse=0.96%  w=(0.436,0.564)
+  [fusion-ds1] epoch 40/150  train=0.012852  val_rmse=0.86%  w=(0.417,0.583)
+  [fusion-ds1] early stop at epoch 50  best_val_rmse=0.55%
+  [fusion-ds1] epoch 1/150  train=0.391451  val_rmse=5.30%  w=(0.468,0.532)
+  [fusion-ds1] epoch 20/150  train=0.017613  val_rmse=0.86%  w=(0.384,0.616)
+  [fusion-ds1] epoch 40/150  train=0.010993  val_rmse=0.61%  w=(0.356,0.644)
+  [fusion-ds1] epoch 60/150  train=0.006074  val_rmse=0.60%  w=(0.346,0.654)
+  [fusion-ds1] early stop at epoch 72  best_val_rmse=0.53%
+  [fusion-ds2] epoch 1/150  train=0.258488  val_rmse=3.38%  w=(0.503,0.497)
+  [fusion-ds2] epoch 20/150  train=0.014370  val_rmse=0.52%  w=(0.469,0.531)
+  [fusion-ds2] epoch 40/150  train=0.005287  val_rmse=0.42%  w=(0.447,0.553)
+  [fusion-ds2] epoch 60/150  train=0.001234  val_rmse=0.26%  w=(0.424,0.576)
+  [fusion-ds2] epoch 80/150  train=0.000601  val_rmse=0.23%  w=(0.402,0.598)
+  [fusion-ds2] early stop at epoch 87  best_val_rmse=0.23%
+  [fusion-ds3] epoch 1/150  train=0.545969  val_rmse=20.52%  w=(0.508,0.492)
+  [fusion-ds3] epoch 20/150  train=0.021046  val_rmse=0.78%  w=(0.452,0.548)
+  [fusion-ds3] epoch 40/150  train=0.017296  val_rmse=0.54%  w=(0.438,0.562)
+  [fusion-ds3] epoch 60/150  train=0.014400  val_rmse=0.85%  w=(0.427,0.573)
+  [fusion-ds3] early stop at epoch 65  best_val_rmse=0.54%
+
+=== Step 4: Evaluate Dataset 1 (Strategy D) ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/sklearn/linear_model/_ridge.py:213: LinAlgWarning: Ill-conditioned matrix (rcond=5.8928e-11): result may not be accurate.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+  D1 fusion=0.47%  single=0.52%  latent=2.40%
+
+=== Step 5: D2 transfer (zero-shot + TL finetune + native) ===
+  D2 zero-shot=1.32%  TL finetune=1.72%  native holdout=0.23%
+
+=== Step 6: D3 holdout ===
+  D3 holdout fusion=0.54%  latent=1.51%
+  Summary: /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/output/RESULTS.md
+
+=== Step 7: Export fused features (.npy) ===
+  Dataset 1: dataset_1_fused.npy  (22506 samples)
+  Dataset 2: dataset_2_fused.npy  (27803 samples)
+  Dataset 3: dataset_3_fused.npy  (8582 samples)
+
+=== Step 8: Thesis figures (Fig 1–5, Fig 10–11) ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig1_relaxation_voltage.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig2_cc_time_all_datasets.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig3_mae_reconstruction.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig4_latent_manifold.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig5_channel_attention.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig10_cycle_protocol_nca_cy45.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig11_manifold_trajectory_combo.png
+
+Done.

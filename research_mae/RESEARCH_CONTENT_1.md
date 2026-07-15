@@ -68,7 +68,8 @@ aging_target = 0.55 × (1 − SOH/SOH_ref) + 0.45 × (cycle / cycle_max_cell)
 - `cycle_max_cell` 为**该电芯内**最大圈数 → 得到**寿命比率**（跨电芯可比）
 - 训练损失：`L = L_recon + λ_aging·SmoothL1(ŷ, target) + λ_rank·L_pairwise_rank`
   - `λ_aging = 0.5`，`λ_rank = 0.2`（`pairwise_ranking_loss` 保证同 batch 内老化顺序一致）
-- MAE 主训练结束后，额外 **20 epoch 老化微调**（`λ_aging ≥ 0.7`）
+- early-stop / best checkpoint **只看重构 val MSE**（不含 aging），避免老化损失抢走解码器
+- MAE 主训练结束后，额外 **40 epoch aging-head 微调**：**冻结 encoder/decoder**，仅更新 `aging_head`（干净编码 latent，无掩码）
 
 > 说明：aging head 仅用于**塑造隐空间单调老化方向**；下游融合/RUL 仍使用 `encode()` 输出的 32 维 z，不直接使用 aging 标量。
 
@@ -135,11 +136,24 @@ aging_target = 0.55 × (1 − SOH/SOH_ref) + 0.45 × (cycle / cycle_max_cell)
 
 | 数据集 | Spearman ρ（Dim 1 vs 寿命比率） |
 |--------|-------------------------------|
-| D1 | **0.893** |
-| D2 | **0.840** |
-| D3 | **0.993** |
+| D1 | **0.894** |
+| D2 | **0.843** |
+| D3 | **0.991** |
 
 论文表述建议：*“将 MAE 学习的老化轴投影到二维流形（第二维为去老化后的残差主成分），Spearman 系数量化隐空间与寿命进程的一致性。”*
+
+### 3.7 单电芯轨迹 + 全数据投影（Fig 11）
+
+**实现文件**：`thesis_figures.py` → `fig11_manifold_trajectory_combo()`
+
+**布局**：2 行 × 3 列（D1 / D2 / D3）
+
+| 行 | 内容 |
+|----|------|
+| **(a) 单电芯轨迹** | 每集选取长寿命电芯，对该电芯全部隐向量做 **t-SNE**（≤800 点均匀抽样），颜色 = 圈数，灰色折线连接时间顺序 |
+| **(b) 全数据老化轴** | 与 Fig 4 相同：Dim 1 = aging head，Dim 2 = 残差 PCA1，颜色 = 寿命比率 |
+
+**叙事分工**：Fig 4 侧重跨电芯老化轴一致性；Fig 11 在同一图中对比「单电芯内连续演变轨迹」与「全数据集老化投影」，便于答辩时解释 D1/D2 二维散射 vs D3 连续流形。
 
 ---
 
@@ -155,7 +169,7 @@ research_mae/
 ├── train.py                # MAE + Fusion 训练（含 aging 监督）
 ├── export_features.py      # .npy 特征导出
 ├── evaluate.py             # Strategy D 容量回归评估
-├── thesis_figures.py       # 论文规格 Fig 1–5、Fig 10
+├── thesis_figures.py       # 论文规格 Fig 1–5、Fig 10–11
 ├── figures.py              # 旧版辅助出图
 ├── run_all.py              # 一键入口
 ├── cache/                  # dataset_*.npz 数据缓存
@@ -208,6 +222,7 @@ python research_mae/run_all.py --skip-mae --device cpu
 | Fig 4 | `fig4_latent_manifold.png` | 三数据集老化轴流形 + Spearman ρ |
 | Fig 5 | `fig5_channel_attention.png` | 通道权重 vs 寿命比率 |
 | Fig 10 | `fig10_cycle_protocol_nca_cy45.png` | NCA 整圈协议（CC/CV/静置/放电） |
+| Fig 11 | `fig11_manifold_trajectory_combo.png` | 单电芯 t-SNE 轨迹 (a) + 全数据老化轴 (b) |
 
 出图入口：`python research_mae/thesis_figures.py --device cuda`
 
@@ -263,10 +278,10 @@ data = load_fused_features(dataset_id=1)
 
 | 数据集 | Fusion RMSE% | R² | Fig4 Spearman ρ |
 |--------|-------------|-----|-----------------|
-| D1 集成 (5 seeds) | **0.43%** | 0.995 | **0.893** |
-| D1 单 seed | 0.50% | 0.993 | — |
-| D2 原生留出 | **0.23%** | 0.998 | **0.840** |
-| D3 留出 | **0.60%** | 0.996 | **0.993** |
+| D1 集成 (5 seeds) | **0.47%** | 0.994 | **0.894** |
+| D1 单 seed | 0.52% | 0.992 | — |
+| D2 原生留出 | **0.23%** | 0.998 | **0.843** |
+| D3 留出 | **0.54%** | 0.996 | **0.991** |
 
 详见 `output/metrics.json`、`output/RESULTS.md`。
 
