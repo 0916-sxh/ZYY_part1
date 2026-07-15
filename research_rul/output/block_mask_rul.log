@@ -1,0 +1,52 @@
+Device: cpu
+
+=== RUL label statistics (Dataset 1) ===
+  {'n_cells': 66, 'n_censored': 10, 'n_reached_eol': 56, 'n_valid_samples': 20423}
+
+=== Train main Quantile TCN (D1, fused features) ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/torch/autograd/graph.py:979: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 12080). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  [RUL-fused] ep 1/50  RMSE=40.2  MAE=22.1  PICP=0.511
+  [RUL-fused] ep 10/50  RMSE=26.9  MAE=14.5  PICP=0.499
+  [RUL-fused] ep 20/50  RMSE=30.4  MAE=16.8  PICP=0.424
+  [RUL-fused] early stop ep 21  best RMSE=25.3
+  [RUL-fused] ep 1/30  RMSE=46.8  MAE=24.4  PICP=0.519
+  [RUL-fused] ep 10/30  RMSE=26.8  MAE=15.0  PICP=0.503
+  [RUL-fused] ep 20/30  RMSE=29.2  MAE=15.8  PICP=0.429
+  [RUL-fused] early stop ep 26  best RMSE=24.9
+  [RUL-fused] ep 1/30  RMSE=38.5  MAE=20.7  PICP=0.519
+  [RUL-fused] ep 10/30  RMSE=26.1  MAE=14.3  PICP=0.498
+  [RUL-fused] ep 20/30  RMSE=27.7  MAE=15.1  PICP=0.450
+  [RUL-fused] early stop ep 23  best RMSE=25.2
+
+=== Ablation (Fig 7) ===
+  [RUL-latent] ep 1/30  RMSE=45.9  MAE=25.4  PICP=0.504
+  [RUL-latent] ep 10/30  RMSE=38.8  MAE=23.3  PICP=0.439
+  [RUL-latent] ep 20/30  RMSE=33.0  MAE=19.6  PICP=0.439
+  [RUL-latent] ep 30/30  RMSE=33.1  MAE=19.4  PICP=0.379
+  Ablation latent: RMSE=32.7  MAE=19.3
+  [RUL-cc] ep 1/30  RMSE=53.8  MAE=30.7  PICP=0.540
+  [RUL-cc] ep 10/30  RMSE=32.0  MAE=18.1  PICP=0.536
+  [RUL-cc] ep 20/30  RMSE=33.8  MAE=19.0  PICP=0.503
+  [RUL-cc] ep 30/30  RMSE=29.8  MAE=17.0  PICP=0.492
+  Ablation cc: RMSE=29.0  MAE=15.4
+  [RUL-concat] ep 1/30  RMSE=56.3  MAE=33.3  PICP=0.462
+  [RUL-concat] ep 10/30  RMSE=31.0  MAE=18.0  PICP=0.499
+  [RUL-concat] ep 20/30  RMSE=32.9  MAE=18.6  PICP=0.396
+  [RUL-concat] ep 30/30  RMSE=31.1  MAE=17.1  PICP=0.385
+  Ablation concat: RMSE=29.3  MAE=16.4
+  [RUL-fused] ep 1/30  RMSE=42.7  MAE=23.4  PICP=0.517
+  [RUL-fused] ep 10/30  RMSE=27.4  MAE=15.4  PICP=0.489
+  [RUL-fused] ep 20/30  RMSE=28.4  MAE=15.6  PICP=0.454
+  [RUL-fused] early stop ep 23  best RMSE=25.2
+  Ablation fused: RMSE=25.2  MAE=13.3
+
+=== Figures 6–9 ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig6_monotonic_penalty.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig7_ablation.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig8_rul_confidence.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig9_transfer_dataset2.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig9_transfer_dataset3.png
+  Summary: /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/output/RESULTS.md
+
+Done.

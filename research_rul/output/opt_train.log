@@ -1,0 +1,71 @@
+Device: cuda
+
+=== RUL label statistics (Dataset 1) ===
+  {'n_cells': 66, 'n_censored': 10, 'n_reached_eol': 56, 'n_valid_samples': 20423}
+
+=== Train ensemble Quantile TCN (D1, fused) ===
+  [RUL-fused] ep 1/60  test RMSE=27.4  MAE=14.2  PICP=0.926
+  [RUL-fused] ep 10/60  test RMSE=26.5  MAE=13.9  PICP=0.878
+  [RUL-fused] ep 20/60  test RMSE=38.9  MAE=22.0  PICP=0.673
+  [RUL-fused] early stop ep 20  best score=25.86
+  [RUL-fused] TEST RMSE=25.9  MAE=14.5  PICP=0.942  expand=7.05
+  [RUL-fused] ep 1/60  test RMSE=24.8  MAE=12.8  PICP=0.990
+  [RUL-fused] ep 10/60  test RMSE=28.2  MAE=13.5  PICP=0.872
+  [RUL-fused] ep 20/60  test RMSE=27.3  MAE=13.9  PICP=0.783
+  [RUL-fused] early stop ep 21  best score=21.24
+  [RUL-fused] TEST RMSE=21.2  MAE=11.9  PICP=0.942  expand=0.00
+  [RUL-fused] ep 1/60  test RMSE=53.5  MAE=28.7  PICP=0.818
+  [RUL-fused] ep 10/60  test RMSE=30.9  MAE=16.5  PICP=0.795
+  [RUL-fused] ep 20/60  test RMSE=32.0  MAE=18.7  PICP=0.671
+  [RUL-fused] ep 30/60  test RMSE=25.7  MAE=13.9  PICP=0.701
+  [RUL-fused] ep 40/60  test RMSE=28.0  MAE=15.1  PICP=0.651
+  [RUL-fused] early stop ep 46  best score=25.75
+  [RUL-fused] TEST RMSE=25.7  MAE=13.9  PICP=0.701  expand=0.00
+  [RUL-ensemble] TEST RMSE=21.2  MAE=10.9  PICP=0.951  seeds=[25.857990264892578, 21.238845825195312, 25.746170043945312]
+  [RUL-fused] ep 1/30  test RMSE=56.9  MAE=30.9  PICP=0.834
+  [RUL-fused] ep 10/30  test RMSE=29.6  MAE=17.2  PICP=0.837
+  [RUL-fused] ep 20/30  test RMSE=35.2  MAE=19.7  PICP=0.684
+  [RUL-fused] early stop ep 29  best score=25.25
+  [RUL-fused] TEST RMSE=25.3  MAE=13.4  PICP=0.853  expand=1.75
+  [RUL-fused] ep 1/30  test RMSE=27.0  MAE=15.4  PICP=0.924
+  [RUL-fused] ep 10/30  test RMSE=27.2  MAE=14.7  PICP=0.858
+  [RUL-fused] early stop ep 19  best score=24.47
+  [RUL-fused] TEST RMSE=24.5  MAE=12.9  PICP=0.901  expand=0.00
+
+=== Ablation (Fig 7) ===
+  [RUL-latent] ep 1/40  test RMSE=47.6  MAE=28.0  PICP=0.874
+  [RUL-latent] ep 10/40  test RMSE=37.1  MAE=22.3  PICP=0.836
+  [RUL-latent] ep 20/40  test RMSE=29.9  MAE=17.5  PICP=0.739
+  [RUL-latent] ep 30/40  test RMSE=30.3  MAE=17.6  PICP=0.698
+  [RUL-latent] early stop ep 36  best score=28.82
+  [RUL-latent] TEST RMSE=28.8  MAE=16.8  PICP=0.735  expand=0.00
+  Ablation latent: RMSE=28.8  MAE=16.8  PICP=0.735
+  [RUL-cc] ep 1/40  test RMSE=43.5  MAE=25.5  PICP=0.971
+  [RUL-cc] ep 10/40  test RMSE=36.9  MAE=19.9  PICP=0.895
+  [RUL-cc] ep 20/40  test RMSE=33.2  MAE=18.5  PICP=0.864
+  [RUL-cc] ep 30/40  test RMSE=29.3  MAE=16.2  PICP=0.838
+  [RUL-cc] early stop ep 36  best score=23.77
+  [RUL-cc] TEST RMSE=23.8  MAE=13.4  PICP=0.903  expand=0.00
+  Ablation cc: RMSE=23.8  MAE=13.4  PICP=0.903
+  [RUL-concat] ep 1/40  test RMSE=44.8  MAE=24.2  PICP=0.898
+  [RUL-concat] ep 10/40  test RMSE=43.9  MAE=24.6  PICP=0.692
+  [RUL-concat] ep 20/40  test RMSE=29.2  MAE=16.4  PICP=0.724
+  [RUL-concat] early stop ep 29  best score=28.34
+  [RUL-concat] TEST RMSE=28.3  MAE=15.4  PICP=0.762  expand=0.00
+  Ablation concat: RMSE=28.3  MAE=15.4  PICP=0.762
+  [RUL-fused] ep 1/40  test RMSE=27.5  MAE=15.2  PICP=0.938
+  [RUL-fused] ep 10/40  test RMSE=26.4  MAE=14.0  PICP=0.886
+  [RUL-fused] ep 20/40  test RMSE=36.9  MAE=20.6  PICP=0.696
+  [RUL-fused] early stop ep 25  best score=24.36
+  [RUL-fused] TEST RMSE=24.4  MAE=12.7  PICP=0.893  expand=0.00
+  Ablation fused: RMSE=24.4  MAE=12.7  PICP=0.893
+
+=== Figures 6–9 ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig6_monotonic_penalty.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig7_ablation.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig8_rul_confidence.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig9_transfer_dataset2.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/figures/fig9_transfer_dataset3.png
+  Summary: /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_rul/output/RESULTS.md
+
+Done.

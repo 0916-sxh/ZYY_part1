@@ -1,0 +1,76 @@
+Device: cpu
+
+=== Step 1: Extract & cache data ===
+
+=== Step 2: Train MS-CNN MAE ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/torch/autograd/graph.py:979: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 12080). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  [short] epoch 1/80  train=0.028456  val=0.003572  lr=1.00e-03
+  [short] epoch 10/80  train=0.017967  val=0.002107  lr=9.62e-04
+  [short] epoch 20/80  train=0.007480  val=0.010392  lr=8.54e-04
+  [short] epoch 30/80  train=0.004461  val=0.001547  lr=6.91e-04
+  [short] epoch 40/80  train=0.006071  val=0.001744  lr=5.00e-04
+  [short] epoch 50/80  train=0.002690  val=0.001147  lr=3.09e-04
+  [short] epoch 60/80  train=0.001296  val=0.001035  lr=1.46e-04
+  [short] epoch 70/80  train=0.000675  val=0.000746  lr=3.81e-05
+  [short] epoch 80/80  train=0.000648  val=0.001027  lr=0.00e+00
+  [long] epoch 1/80  train=0.065490  val=0.004041  lr=1.00e-03
+  [long] epoch 10/80  train=0.003884  val=0.001142  lr=9.62e-04
+  [long] epoch 20/80  train=0.002459  val=0.000816  lr=8.54e-04
+  [long] epoch 30/80  train=0.002300  val=0.001659  lr=6.91e-04
+  [long] early stop at epoch 38  best_val=0.000373
+
+=== Step 3: Train fusion D1 ensemble (seeds=[42, 43, 44]) + D2/D3 ===
+  [fusion-ds1] epoch 1/150  train=0.360295  val_rmse=10.28%  w=(0.520,0.480)
+  [fusion-ds1] epoch 20/150  train=0.002560  val_rmse=1.14%  w=(0.476,0.524)
+  [fusion-ds1] epoch 40/150  train=0.001473  val_rmse=0.92%  w=(0.468,0.532)
+  [fusion-ds1] epoch 60/150  train=0.001192  val_rmse=1.01%  w=(0.461,0.539)
+  [fusion-ds1] epoch 80/150  train=0.000997  val_rmse=0.85%  w=(0.459,0.541)
+  [fusion-ds1] early stop at epoch 90  best_val_rmse=0.71%
+  [fusion-ds1] epoch 1/150  train=0.560971  val_rmse=21.60%  w=(0.504,0.496)
+  [fusion-ds1] epoch 20/150  train=0.002179  val_rmse=0.76%  w=(0.449,0.551)
+  [fusion-ds1] early stop at epoch 36  best_val_rmse=0.66%
+  [fusion-ds1] epoch 1/150  train=0.277861  val_rmse=5.12%  w=(0.522,0.478)
+  [fusion-ds1] epoch 20/150  train=0.001311  val_rmse=0.47%  w=(0.449,0.551)
+  [fusion-ds1] epoch 40/150  train=0.001095  val_rmse=0.68%  w=(0.436,0.564)
+  [fusion-ds1] early stop at epoch 45  best_val_rmse=0.47%
+  [fusion-ds2] epoch 1/150  train=0.237222  val_rmse=3.20%  w=(0.507,0.493)
+  [fusion-ds2] epoch 20/150  train=0.000897  val_rmse=0.62%  w=(0.481,0.519)
+  [fusion-ds2] epoch 40/150  train=0.000393  val_rmse=0.46%  w=(0.460,0.540)
+  [fusion-ds2] epoch 60/150  train=0.000289  val_rmse=0.54%  w=(0.445,0.555)
+  [fusion-ds2] early stop at epoch 69  best_val_rmse=0.34%
+  [fusion-ds3] epoch 1/150  train=0.469412  val_rmse=33.91%  w=(0.531,0.469)
+  [fusion-ds3] epoch 20/150  train=0.006369  val_rmse=1.63%  w=(0.471,0.529)
+  [fusion-ds3] epoch 40/150  train=0.001786  val_rmse=1.31%  w=(0.449,0.551)
+  [fusion-ds3] epoch 60/150  train=0.000872  val_rmse=1.28%  w=(0.443,0.557)
+  [fusion-ds3] epoch 80/150  train=0.000692  val_rmse=1.23%  w=(0.438,0.562)
+  [fusion-ds3] epoch 100/150  train=0.000582  val_rmse=1.24%  w=(0.434,0.566)
+  [fusion-ds3] epoch 120/150  train=0.000625  val_rmse=1.22%  w=(0.432,0.568)
+  [fusion-ds3] epoch 140/150  train=0.000581  val_rmse=1.21%  w=(0.432,0.568)
+  [fusion-ds3] early stop at epoch 142  best_val_rmse=1.15%
+
+=== Step 4: Evaluate Dataset 1 (Strategy D) ===
+/home/sxh/anaconda3/envs/battery-capacity/lib/python3.10/site-packages/sklearn/linear_model/_ridge.py:213: LinAlgWarning: Ill-conditioned matrix (rcond=6.28345e-12): result may not be accurate.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+  D1 fusion=0.56%  single=0.71%  latent=3.29%
+
+=== Step 5: D2 transfer (zero-shot + TL finetune + native) ===
+  D2 zero-shot=1.49%  TL finetune=2.22%  native holdout=0.34%
+
+=== Step 6: D3 holdout ===
+  D3 holdout fusion=1.15%  latent=2.11%
+  Summary: /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/output/RESULTS.md
+
+=== Step 7: Export fused features (.npy) ===
+  Dataset 1: dataset_1_fused.npy  (22506 samples)
+  Dataset 2: dataset_2_fused.npy  (27803 samples)
+  Dataset 3: dataset_3_fused.npy  (8582 samples)
+
+=== Step 8: Thesis figures (Fig 1–5) ===
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig1_relaxation_voltage.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig2_cc_time_dataset1.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig3_mae_reconstruction.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig4_latent_manifold.png
+  /home/sxh/data-driven-capacity-estimation-from-voltage-relaxation/research_mae/figures/fig5_channel_attention.png
+
+Done.
