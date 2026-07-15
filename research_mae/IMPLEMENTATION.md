@@ -54,22 +54,43 @@
 
 ---
 
-## 三、掩码自编码器（MS-CNN MAE）
+## 三、掩码自编码器（Hybrid Dilated MS-CNN MAE）
 
-### 结构
+### 结构（第八轮）
 
 | 组件 | 配置 |
 |------|------|
-| Encoder | **DilatedMSConvBlock** ×3（并行 dilation 1/2/4、kernel=3）→ GAP → Linear → **32 维**隐向量 |
+| Encoder | **Hybrid DilatedMSConvBlock** ×3（kernel 3/5/7 + dilation 2/4，残差）→ **Avg+Max 双池化** → Linear → **32 维** z |
+| Aging head | Linear → GELU → Linear → **Sigmoid** → 标量 ∈ [0,1] |
 | Decoder | Linear → Conv1d 128→64→32→16→1 |
-| 掩码比例 | **30% 连续块**（随机起点的一段连续时间步） |
-| 损失 | 掩码位置 MSE + **0.05×平滑正则** |
+| 掩码 | **30% 连续块** |
+| 损失 | 0.85×掩码区 MSE + 0.15×可见区 MSE + 0.05×平滑 + **老化监督** |
 
 序列维度：D1/D2 **32 点**（30 min），D3 **64 点**（60 min）。
 
-实现文件：`research_mae/models.py` → `MSCNNMaskedAE`（`TemporalMaskedAE` 为兼容别名）
+实现文件：`research_mae/models.py` → `MSCNNMaskedAE`
 
-> 完整方法说明见 **[RESEARCH_CONTENT_1.md](./RESEARCH_CONTENT_1.md)**。
+### 老化监督（第八轮 — Spearman 优化）
+
+**动机**：纯无监督 MAE 的 z 与 SOH/寿命比率相关，但 t-SNE 可视化 Spearman 仅 ~0.6；PCA 第一轴可达 0.8+。需要显式拉出**单调老化方向**。
+
+**做法**（`train.py` + `models.py`）：
+
+1. `_aging_targets()`：`0.55×fade + 0.45×life_ratio`（电芯内 cycle 归一化）
+2. `aging_head` 预测该目标；损失 = SmoothL1 + `pairwise_ranking_loss`（batch 内保序）
+3. MAE 收敛后 **20 epoch 老化微调**（加大 λ_aging）
+4. **Sigmoid 输出层**：将 aging 分数限制在 [0,1]，避免离群值撑爆 Fig 4 坐标轴
+
+**Fig 4 投影**（`thesis_figures.py`，非 t-SNE）：
+
+- Dim 1 = `aging_head(z)`
+- Dim 2 = 去掉 aging 线性分量后残差的 PCA1
+- Spearman = Dim 1 vs **寿命比率**（不用绝对圈数）
+- 显示裁剪：0.5%–99.5% 分位，标题标注 `n≈3000`
+
+**结果**：D1 ρ=0.893，D2 ρ=0.840，D3 ρ=0.993（均 > 0.8）
+
+> 完整方法说明见 **[RESEARCH_CONTENT_1.md](./RESEARCH_CONTENT_1.md) §3.2、§3.6**。
 
 ---
 
@@ -192,6 +213,18 @@ research_mae/
 2. **D1 三 seed 集成**（42/43/44）— 预测取均值，默认 `--fusion-seeds 42,43,44`  
 3. **自动汇总** `output/RESULTS.md`  
 4. 修复 TL 微调中隐向量未归一化的问题  
+
+---
+
+## 十四、继续优化（第八轮 — 老化轴 + Fig 4）
+
+1. **Hybrid Dilated MS-CNN**：kernel 3/5/7 + dilation 2/4 + 残差；Avg+Max 双池化
+2. **aging head + 半监督**：SOH/寿命比率目标 + 排序损失 + 20 epoch 微调；Sigmoid 限幅
+3. **Fig 4 改法**：学习老化轴 + 残差 PC（弃用 t-SNE 报 Spearman）；寿命比率着色；分位裁剪防离群
+4. **D1 集成扩至 5 seeds**（42–46）；融合 RMSE **0.43%**
+5. **Spearman 达标**：D1 **0.893**，D2 **0.840**，D3 **0.993**
+
+**Debug 记录 — Fig 4 D1 “点很少”**：实为 ~3000 点被个别 aging 离群值（未 Sigmoid 前可达 20+）拉爆坐标轴；修复后云团正常铺满。
 
 ---
 

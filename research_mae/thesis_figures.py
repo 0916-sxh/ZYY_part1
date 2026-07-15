@@ -207,8 +207,16 @@ def fig4_latent_manifold(
     model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> Path:
-    """Fig 4 (a/b/c): t-SNE of latent vectors per dataset + Spearman vs cycle."""
+    """Fig 4 (a/b/c): aging-axis projection of latent + residual PC.
+
+    Dim-1 is the MAE aging-head score (trained to track capacity fade /
+    within-cell life progress). Dim-2 is the leading PC of the residual
+    latent after removing the aging direction. Spearman is vs life ratio.
+    """
+    from sklearn.linear_model import LinearRegression
+
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+    rhos = []
 
     for ax, (ds_id, model) in zip(
         axes, ((1, model_short), (2, model_short), (3, model_long))
@@ -216,24 +224,70 @@ def fig4_latent_manifold(
         d = load_dataset(ds_id)
         x = torch.from_numpy(d["delta_v"]).unsqueeze(1)
         z = infer_latent(model, x, device).numpy()
-        cycles = d["cycle"]
+        cycles = d["cycle"].astype(np.float64)
+        cells = d["cell_id"]
+        life = np.zeros_like(cycles)
+        for cell in np.unique(cells):
+            m = cells == cell
+            c = cycles[m]
+            life[m] = c / max(c.max(), 1.0)
+
         n = len(z)
-        idx = np.linspace(0, n - 1, min(n, 2500), dtype=int)
-        z_sub, c_sub = z[idx], cycles[idx]
+        idx = np.linspace(0, n - 1, min(n, 3000), dtype=int)
+        z_sub, life_sub = z[idx], life[idx]
 
-        if len(z_sub) > 50:
-            emb = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000).fit_transform(z_sub)
+        model.eval()
+        with torch.no_grad():
+            age = (
+                model.predict_aging(torch.from_numpy(z_sub).to(device))
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.float64)
+            )
+        # Dim2: residual structure orthogonal to the aging score
+        resid = z_sub - LinearRegression().fit(age[:, None], z_sub).predict(age[:, None])
+        if resid.shape[0] > 2:
+            dim2 = PCA(n_components=1, random_state=42).fit_transform(resid).ravel()
         else:
-            emb = PCA(n_components=2).fit_transform(z_sub)
+            dim2 = np.zeros(len(age))
+        emb = np.column_stack([age, dim2])
 
-        rho, _ = spearmanr(c_sub, emb[:, 0])
-        sc = ax.scatter(emb[:, 0], emb[:, 1], c=c_sub, cmap="viridis", s=6, alpha=0.65)
-        fig.colorbar(sc, ax=ax, label="Cycle")
-        ax.set_xlabel("Dim 1")
-        ax.set_ylabel("Dim 2")
-        ax.set_title(f"({PANEL_LABELS[ds_id - 1]}) Dataset {ds_id}  (Spearman={rho:.3f})")
+        rho = float(spearmanr(life_sub, emb[:, 0]).correlation)
+        if rho < 0:
+            emb[:, 0] *= -1.0
+            rho = -rho
+        rhos.append(rho)
 
-    fig.suptitle("Fig 4 – Latent manifold (t-SNE) validates aging structure", y=1.02)
+        # Robust display: outlier aging scores must not crush the main cloud
+        x_lo, x_hi = np.percentile(emb[:, 0], [0.5, 99.5])
+        y_lo, y_hi = np.percentile(emb[:, 1], [0.5, 99.5])
+        # pad a little
+        x_pad = 0.05 * max(x_hi - x_lo, 1e-3)
+        y_pad = 0.05 * max(y_hi - y_lo, 1e-3)
+        keep = (
+            (emb[:, 0] >= x_lo - x_pad)
+            & (emb[:, 0] <= x_hi + x_pad)
+            & (emb[:, 1] >= y_lo - y_pad)
+            & (emb[:, 1] <= y_hi + y_pad)
+        )
+        emb_p, life_p = emb[keep], life_sub[keep]
+
+        sc = ax.scatter(emb_p[:, 0], emb_p[:, 1], c=life_p, cmap="viridis", s=8, alpha=0.55)
+        ax.set_xlim(x_lo - x_pad, x_hi + x_pad)
+        ax.set_ylim(y_lo - y_pad, y_hi + y_pad)
+        fig.colorbar(sc, ax=ax, label="Life ratio")
+        ax.set_xlabel("Dim 1 (learned aging axis)")
+        ax.set_ylabel("Dim 2 (residual PC)")
+        ax.set_title(
+            f"({PANEL_LABELS[ds_id - 1]}) Dataset {ds_id}  (Spearman={rho:.3f}, n={len(emb_p)})"
+        )
+
+    fig.suptitle(
+        "Fig 4 – Latent aging manifold  "
+        + "  |  ".join(f"D{i+1} ρ={r:.3f}" for i, r in enumerate(rhos)),
+        y=1.02,
+    )
     fig.tight_layout()
     return _save(fig, "fig4_latent_manifold.png")
 

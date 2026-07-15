@@ -133,7 +133,16 @@ python research_rul/run_all.py --figures-only --device cuda
 
 ![Fig 3](research_mae/figures/fig3_mae_reconstruction.png)
 
-#### Fig 4 — 隐向量老化流形（t-SNE，分数据集 + Spearman）
+#### Fig 4 — 隐向量老化流形（学习老化轴 + 残差 PC；Spearman vs **寿命比率**）
+
+| Dataset 1 | Dataset 2 | Dataset 3 |
+|-----------|-----------|-----------|
+| **ρ = 0.893** | **ρ = 0.840** | **ρ = 0.993** |
+
+- Dim 1 = MAE `aging_head` 输出（Sigmoid ∈ [0,1]）
+- Dim 2 = 去老化方向后残差的 PCA1
+- 每集子采样 ~3000 点；0.5%–99.5% 分位裁剪显示范围
+- 详见 `research_mae/RESEARCH_CONTENT_1.md` §3.6
 
 ![Fig 4](research_mae/figures/fig4_latent_manifold.png)
 

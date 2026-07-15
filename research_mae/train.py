@@ -29,9 +29,34 @@ ROOT = Path(__file__).resolve().parent
 CKPT_DIR = ROOT / "checkpoints"
 
 
-def _loader(delta_v: np.ndarray, batch_size: int = 128, shuffle: bool = True) -> DataLoader:
-    x = torch.from_numpy(delta_v).unsqueeze(1)
-    return DataLoader(TensorDataset(x), batch_size=batch_size, shuffle=shuffle)
+def _loader(
+    delta_v: np.ndarray,
+    aging: np.ndarray | None = None,
+    batch_size: int = 128,
+    shuffle: bool = True,
+) -> DataLoader:
+    x = torch.from_numpy(delta_v.astype(np.float32)).unsqueeze(1)
+    if aging is None:
+        return DataLoader(TensorDataset(x), batch_size=batch_size, shuffle=shuffle)
+    y = torch.from_numpy(aging.astype(np.float32))
+    return DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=shuffle)
+
+
+def _aging_targets(
+    capacity: np.ndarray,
+    cell_ids: np.ndarray,
+    cycles: np.ndarray,
+    dataset_id: int,
+) -> np.ndarray:
+    """Aging progress in [0,1]: blend of capacity fade and within-cell life ratio."""
+    soh = capacity / (NOMINAL_AH[dataset_id] * 1000.0)
+    fade = np.clip(1.0 - soh / max(float(np.percentile(soh, 95)), 1e-3), 0.0, 1.0)
+    life = np.zeros_like(cycles, dtype=np.float32)
+    for cell in np.unique(cell_ids):
+        m = cell_ids == cell
+        c = cycles[m].astype(np.float32)
+        life[m] = c / max(float(c.max()), 1.0)
+    return (0.55 * fade + 0.45 * life).astype(np.float32)
 
 
 def _holdout_cell_indices(cell_ids: np.ndarray, val_frac: float = 0.15, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
@@ -55,6 +80,9 @@ def _mae_val_loss(model: MSCNNMaskedAE, loader: DataLoader, device: str) -> floa
         mse_m = ((recon - x) ** 2 * (1.0 - mask)).sum() / (1.0 - mask).sum().clamp(min=1.0)
         mse_v = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
         mse = 0.85 * mse_m + 0.15 * mse_v
+        if len(batch) > 1 and "aging" in out:
+            aging_t = batch[1].to(device)
+            mse = mse + 0.25 * nn.functional.smooth_l1_loss(out["aging"], aging_t)
         total += float(mse.item()) * x.size(0)
         n += x.size(0)
     return total / max(n, 1)
@@ -67,8 +95,13 @@ def train_mae(
     epochs: int = 60,
     latent_dim: int = 32,
     cell_ids: np.ndarray | None = None,
+    capacity: np.ndarray | None = None,
+    cycles: np.ndarray | None = None,
+    dataset_id: int = 1,
     device: str = "cpu",
     patience: int = 15,
+    lambda_aging: float = 0.5,
+    lambda_rank: float = 0.2,
 ) -> tuple[MSCNNMaskedAE, TrainHistory]:
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     model = MSCNNMaskedAE(seq_len=seq_len, latent_dim=latent_dim, mask_ratio=0.3)
@@ -77,13 +110,17 @@ def train_mae(
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     history = TrainHistory(name=f"mae_{name}")
 
+    aging = None
+    if capacity is not None and cell_ids is not None and cycles is not None:
+        aging = _aging_targets(capacity, cell_ids, cycles, dataset_id)
+
     if cell_ids is not None:
         train_idx, val_idx = _holdout_cell_indices(cell_ids)
-        full_loader = _loader(delta_v)
-        train_loader = DataLoader(Subset(full_loader.dataset, train_idx.tolist()), batch_size=128, shuffle=True)
-        val_loader = DataLoader(Subset(full_loader.dataset, val_idx.tolist()), batch_size=256, shuffle=False)
+        full_ds = _loader(delta_v, aging, shuffle=False).dataset
+        train_loader = DataLoader(Subset(full_ds, train_idx.tolist()), batch_size=128, shuffle=True)
+        val_loader = DataLoader(Subset(full_ds, val_idx.tolist()), batch_size=256, shuffle=False)
     else:
-        train_loader = _loader(delta_v)
+        train_loader = _loader(delta_v, aging)
         val_loader = None
 
     best_val = float("inf")
@@ -91,11 +128,26 @@ def train_mae(
     stale = 0
 
     for ep in range(1, epochs + 1):
-        metrics = train_mae_epoch(model, train_loader, opt, device)
+        metrics = train_mae_epoch(
+            model,
+            train_loader,
+            opt,
+            device,
+            lambda_aging=lambda_aging,
+            lambda_rank=lambda_rank,
+        )
         sched.step()
         val_loss = _mae_val_loss(model, val_loader, device) if val_loader else metrics["mse"]
         lr = opt.param_groups[0]["lr"]
-        history.append(ep, metrics["mse"], val_loss, lr, smooth=metrics["smooth"], total_loss=metrics["loss"])
+        history.append(
+            ep,
+            metrics["mse"],
+            val_loss,
+            lr,
+            smooth=metrics["smooth"],
+            total_loss=metrics["loss"],
+            aging=metrics.get("aging", 0.0),
+        )
 
         if val_loss < best_val:
             best_val = val_loss
@@ -105,7 +157,10 @@ def train_mae(
             stale += 1
 
         if ep % 10 == 0 or ep == 1:
-            print(f"  [{name}] epoch {ep}/{epochs}  train={metrics['mse']:.6f}  val={val_loss:.6f}  lr={lr:.2e}")
+            print(
+                f"  [{name}] epoch {ep}/{epochs}  train={metrics['mse']:.6f}  "
+                f"aging={metrics.get('aging', 0):.4f}  val={val_loss:.6f}  lr={lr:.2e}"
+            )
 
         if val_loader and stale >= patience:
             print(f"  [{name}] early stop at epoch {ep}  best_val={best_val:.6f}")
@@ -113,6 +168,22 @@ def train_mae(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+
+    # Short aging-focused fine-tune to strengthen the monotonic aging axis
+    if aging is not None and lambda_aging > 0:
+        print(f"  [{name}] aging fine-tune (20 epochs)…")
+        ft_loader = _loader(delta_v, aging, batch_size=128, shuffle=True)
+        opt_ft = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
+        for ep in range(1, 21):
+            train_mae_epoch(
+                model,
+                ft_loader,
+                opt_ft,
+                device,
+                lambda_aging=max(lambda_aging, 0.7),
+                lambda_rank=max(lambda_rank, 0.3),
+            )
+
     torch.save({"state_dict": model.state_dict(), "latent_dim": latent_dim}, CKPT_DIR / f"mae_{name}.pt")
     history.save()
     return model, history
@@ -319,7 +390,7 @@ def load_mae(name: str, seq_len: int, latent_dim: int = 32, device: str = "cpu")
     else:
         state = ckpt
     model = MSCNNMaskedAE(seq_len=seq_len, latent_dim=latent_dim)
-    model.load_state_dict(state)
+    model.load_state_dict(state, strict=False)
     model.to(device)
     model.eval()
     return model

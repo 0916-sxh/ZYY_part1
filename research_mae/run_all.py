@@ -67,14 +67,34 @@ def main():
             model_short = load_mae("short", SEQ_SHORT, device=device)
             model_long = load_mae("long", SEQ_LONG, device=device)
         else:
-            print("\n=== Step 2: Train Hybrid Dilated MS-CNN MAE ===")
+            print("\n=== Step 2: Train Hybrid Dilated MS-CNN MAE (aging-aware) ===")
             dv_short = np.vstack([d1["delta_v"], d2["delta_v"]])
             cells_short = np.concatenate([d1["cell_id"], d2["cell_id"]])
+            cap_short = np.concatenate([d1["capacity"], d2["capacity"]])
+            cyc_short = np.concatenate([d1["cycle"], d2["cycle"]])
             model_short, h1 = train_mae(
-                dv_short, SEQ_SHORT, "short", args.epochs_mae, cell_ids=cells_short, device=device, patience=20
+                dv_short,
+                SEQ_SHORT,
+                "short",
+                args.epochs_mae,
+                cell_ids=cells_short,
+                capacity=cap_short,
+                cycles=cyc_short,
+                dataset_id=1,
+                device=device,
+                patience=20,
             )
             model_long, h2 = train_mae(
-                d3["delta_v"], SEQ_LONG, "long", args.epochs_mae, cell_ids=d3["cell_id"], device=device, patience=20
+                d3["delta_v"],
+                SEQ_LONG,
+                "long",
+                args.epochs_mae,
+                cell_ids=d3["cell_id"],
+                capacity=d3["capacity"],
+                cycles=d3["cycle"],
+                dataset_id=3,
+                device=device,
+                patience=20,
             )
             histories.extend([h1, h2])
 

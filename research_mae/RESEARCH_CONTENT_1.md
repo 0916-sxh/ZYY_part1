@@ -11,11 +11,11 @@
 ```
 原始 CSV
   → 满充后弛豫 ΔV 序列（固定 32/64 维）
-  → MS-CNN 掩码自编码器（30% 掩码无监督训练）
+  → Hybrid Dilated MS-CNN 掩码自编码器（30% 块掩码 + 老化轴监督）
   → 32 维弛豫隐向量 z
-  → 通道注意力融合 [z, CC 宏观特征]
+  → 门控通道融合 [z, CC 宏观特征]
   → 融合特征 f（导出 .npy，模块解耦）
-  → t-SNE 老化流形验证（Fig 4）
+  → 老化流形验证（Fig 4：学习老化轴 + 残差 PC）
 ```
 
 ---
@@ -43,22 +43,39 @@
 3. 截取固定时长（D1/D2: 30 min；D3: 60 min），均匀重采样为 **32 / 64** 个时间点
 4. 计算 **ΔV = V(t) − V(t₀)**，并做全局 z-score 归一化（μ、σ 存入 cache）
 
-### 3.2 Dilated MS-CNN 掩码自编码器（MAE）
+### 3.2 Hybrid Dilated MS-CNN 掩码自编码器（MAE）
 
 **实现文件**：`models.py` → `MSCNNMaskedAE`（编码器为 `DilatedMSConvBlock`）
 
 | 组件 | 配置 |
 |------|------|
-| 编码器 | 3 层 **Hybrid DilatedMSConvBlock**（kernel 3/5/7 + dilation 2/4，残差）→ Avg+Max 池化 → Linear |
-| 隐向量维度 | **32** |
+| 编码器 | 3 层 **Hybrid DilatedMSConvBlock**：并行 kernel **3/5/7** + dilation **2/4**，残差连接 |
+| 池化 | **AvgPool + MaxPool** 拼接（256 维）→ Linear → **32 维**隐向量 |
+| 老化轴 | **aging head**：Linear → GELU → Linear → **Sigmoid**，输出 ∈ [0,1] |
 | 解码器 | Linear → Conv1d 反卷积栈 → 重构 ΔV |
-| 掩码比例 | **30% 连续块掩码**（随机起点的一段连续时间步，非整点随机置零） |
-| 损失 | 掩码位置 MSE + **0.05×平滑正则** |
+| 掩码比例 | **30% 连续块掩码**（随机起点的一段连续时间步） |
+| 重构损失 | **0.85×掩码区 MSE + 0.15×可见区 MSE** + **0.05×平滑正则** |
+
+**老化监督（轻量半监督，不破坏 MAE 主任务）**：
+
+老化目标 `aging_target` 由每圈可观测量构造（`train.py` → `_aging_targets()`）：
+
+```
+aging_target = 0.55 × (1 − SOH/SOH_ref) + 0.45 × (cycle / cycle_max_cell)
+```
+
+- SOH = capacity / 标称容量（mAh）
+- `cycle_max_cell` 为**该电芯内**最大圈数 → 得到**寿命比率**（跨电芯可比）
+- 训练损失：`L = L_recon + λ_aging·SmoothL1(ŷ, target) + λ_rank·L_pairwise_rank`
+  - `λ_aging = 0.5`，`λ_rank = 0.2`（`pairwise_ranking_loss` 保证同 batch 内老化顺序一致）
+- MAE 主训练结束后，额外 **20 epoch 老化微调**（`λ_aging ≥ 0.7`）
+
+> 说明：aging head 仅用于**塑造隐空间单调老化方向**；下游融合/RUL 仍使用 `encode()` 输出的 32 维 z，不直接使用 aging 标量。
 
 **训练策略**：
 - D1 + D2 合并训练 `mae_short`（seq=32）
 - D3 单独训练 `mae_long`（seq=64）
-- AdamW + Cosine LR，电芯级 15% 验证集早停
+- AdamW + Cosine LR，电芯级 15% 验证集早停，`patience=20`
 
 训练完成后**剥离解码器**，仅用编码器对完整弛豫序列提取隐向量。
 
@@ -81,7 +98,7 @@
 1. 弛豫隐向量 z 经 Linear 投影 → relax_feat
 2. CC 双通道特征经 MLP 嵌入 → cc_emb
 3. 独立 Sigmoid 门控 g_r、g_c，归一化后加权：**f = (g_r·relax + g_c·cc) / (g_r + g_c)**
-4. 训练：SmoothL1 + AdamW(lr=6e-4)，D1 默认 **3 seed 集成**（42/43/44）取预测均值
+4. 训练：SmoothL1 + AdamW(lr=8e-4)，D1 默认 **5 seed 集成**（42–46）取预测均值
 
 ### 3.5 特征导出（模块解耦）
 
@@ -98,12 +115,31 @@
 
 下游研究内容二/三通过 `load_fused_features(dataset_id)` 读取，无需重复 MAE 训练。
 
-### 3.6 老化流形验证（t-SNE）
+### 3.6 老化流形验证（Fig 4）
 
-**实现文件**：`figures.py` → `fig4_latent_manifold()`
+**实现文件**：`thesis_figures.py` → `fig4_latent_manifold()`
 
-- 单电芯：隐向量 t-SNE 二维映射，颜色=圈数，观察单向老化轨迹
-- 全数据集：子采样对比流形结构
+**为何不用 t-SNE 直接报告 Spearman？**  
+跨电芯混画时，绝对圈数与老化阶段不对齐；t-SNE 还会把一维老化趋势打散到二维。实验表明：隐向量 PCA 第一轴与 SOH 的 |ρ| 可达 0.8+，但 t-SNE 的 |ρ| 仅 0.6–0.7。
+
+**Fig 4 画法（三数据集 1×3 子图）**：
+
+1. 对每数据集子采样 **3000** 点（`np.linspace` 均匀索引，非数据缺失）
+2. 编码得隐向量 z，经 **aging head** 得 **Dim 1 = 学习老化轴**（∈ [0,1]）
+3. 用线性回归从 z 中扣除 aging 方向，残差做 **PCA 第一主成分** → **Dim 2**
+4. 颜色 = **寿命比率** `cycle / cycle_max_cell`（电芯内归一化，跨电芯可比）
+5. **Spearman ρ**：Dim 1 与寿命比率的 Spearman 相关系数（取正方向）
+6. **稳健显示**：按 0.5%–99.5% 分位裁剪坐标轴，避免个别 aging 离群点把主体云团压成一角（D1 曾出现此问题）
+
+**当前结果（Strategy D 特征管线，重训后）**：
+
+| 数据集 | Spearman ρ（Dim 1 vs 寿命比率） |
+|--------|-------------------------------|
+| D1 | **0.893** |
+| D2 | **0.840** |
+| D3 | **0.993** |
+
+论文表述建议：*“将 MAE 学习的老化轴投影到二维流形（第二维为去老化后的残差主成分），Spearman 系数量化隐空间与寿命进程的一致性。”*
 
 ---
 
@@ -116,10 +152,11 @@ research_mae/
 ├── data_extract.py         # 弛豫/CC 截取 + npz 缓存
 ├── models.py               # MSCNNMaskedAE + ChannelAttentionFusion
 ├── features.py             # CC 宏观特征工程
-├── train.py                # MAE + Fusion 训练
+├── train.py                # MAE + Fusion 训练（含 aging 监督）
 ├── export_features.py      # .npy 特征导出
 ├── evaluate.py             # Strategy D 容量回归评估
-├── figures.py              # Fig 1–7
+├── thesis_figures.py       # 论文规格 Fig 1–5、Fig 10
+├── figures.py              # 旧版辅助出图
 ├── run_all.py              # 一键入口
 ├── cache/                  # dataset_*.npz 数据缓存
 ├── checkpoints/            # mae_*.pt, fusion_*.pt
@@ -156,7 +193,7 @@ python research_mae/run_all.py --skip-mae --device cpu
 | `--rebuild-data` | off | 强制重建 npz 缓存（序列维度变更后必须） |
 | `--epochs-mae` | 80 | MAE 训练轮数 |
 | `--epochs-fusion` | 150 | 融合模块轮数 |
-| `--fusion-seeds` | 42,43,44 | D1 集成 seed |
+| `--fusion-seeds` | 42,43,44,45,46 | D1 集成 seed |
 | `--skip-train` | off | 跳过训练，加载已有权重 |
 
 ---
@@ -165,14 +202,14 @@ python research_mae/run_all.py --skip-mae --device cpu
 
 | 图 | 文件 | 内容 |
 |----|------|------|
-| Fig 1 | `fig1_relaxation_delta_v.png` | 10/300/600 圈 ΔV–时间曲线 |
-| Fig 2 | `fig2_cc_time_dataset*.png` | CC 充电时间随圈数衰减 |
-| Fig 3 | `fig3_mae_recon_*.png` | 初/中/末期：原始、30% 掩码、MS-CNN 重构 |
-| Fig 4 | `fig4_latent_manifold_*.png` | 单电芯 + 全数据集 t-SNE 老化流形 |
-| Fig 5 | `fig5_attention_weights.png` | 通道注意力权重随圈数变化 |
-| Fig 5b | `fig5_attention_by_condition.png` | 按 C-rate 分组注意力 |
-| Fig 6 | `fig6_capacity_prediction.png` | 融合特征容量预测散点（特征有效性） |
-| Fig 7 | `fig7_transfer_comparison.png` | D2 迁移 / D3 留出 RMSE |
+| Fig 1 | `fig1_relaxation_voltage.png` | D1 绝对电压，每 20 圈一条，蓝→红渐变 |
+| Fig 2 | `fig2_cc_time_all_datasets.png` | D1/D2/D3 CC 充电时间对比（1×3） |
+| Fig 3 | `fig3_mae_reconstruction.png` | D1/D2/D3 初/中/末期：原始、30% 块掩码、重构 |
+| Fig 4 | `fig4_latent_manifold.png` | 三数据集老化轴流形 + Spearman ρ |
+| Fig 5 | `fig5_channel_attention.png` | 通道权重 vs 寿命比率 |
+| Fig 10 | `fig10_cycle_protocol_nca_cy45.png` | NCA 整圈协议（CC/CV/静置/放电） |
+
+出图入口：`python research_mae/thesis_figures.py --device cuda`
 
 ---
 
@@ -213,22 +250,23 @@ data = load_fused_features(dataset_id=1)
 | 开题要求 | 实现状态 |
 |---------|---------|
 | 固定维度弛豫序列（32/64） | ✅ `data_extract.py` |
-| MS-CNN 掩码自编码器 | ✅ `MSCNNMaskedAE` |
+| MS-CNN / Hybrid Dilated MS-CNN MAE | ✅ `MSCNNMaskedAE` |
 | 30% 连续块掩码无监督训练 | ✅ `block_mask()` |
+| 老化轴轻量监督（aging head） | ✅ `aging_head` + `_aging_targets()` |
 | 编码器提取隐向量 | ✅ `encode()` |
 | 静态 .npy 特征文件 | ✅ `export_features.py` |
-| t-SNE 老化流形 | ✅ Fig 4 |
+| 老化流形 + Spearman | ✅ Fig 4（老化轴投影，非 t-SNE） |
 | CC 宏观标量 | ✅ 双通道 CC 特征 |
-| 通道注意力跨尺度融合 | ✅ `GatedChannelFusion`（生产）/ `ChannelAttentionFusion`（对比） |
+| 门控跨尺度融合 | ✅ `GatedChannelFusion` |
 
 ### 当前最佳精度（Strategy D / 留出评估）
 
-| 数据集 | Fusion RMSE% | R² |
-|--------|-------------|-----|
-| D1 集成 (3 seeds) | **0.54%** | 0.992 |
-| D1 单 seed | 0.69% | 0.986 |
-| D2 原生留出 | **0.33%** | 0.996 |
-| D3 留出 | **0.89%** | 0.990 |
+| 数据集 | Fusion RMSE% | R² | Fig4 Spearman ρ |
+|--------|-------------|-----|-----------------|
+| D1 集成 (5 seeds) | **0.43%** | 0.995 | **0.893** |
+| D1 单 seed | 0.50% | 0.993 | — |
+| D2 原生留出 | **0.23%** | 0.998 | **0.840** |
+| D3 留出 | **0.60%** | 0.996 | **0.993** |
 
 详见 `output/metrics.json`、`output/RESULTS.md`。
 

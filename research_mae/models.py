@@ -94,6 +94,13 @@ class MSCNNMaskedAE(nn.Module):
             ConvBlock(32, 16, 3),
             nn.Conv1d(16, 1, 3, padding=1),
         )
+        # Soft aging axis: latent→SOH head pulls manifold toward monotonic aging
+        self.aging_head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
+            nn.GELU(),
+            nn.Linear(latent_dim // 2, 1),
+            nn.Sigmoid(),  # keep aging score in [0, 1]
+        )
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         h = self.encoder_stem(x)
@@ -104,6 +111,9 @@ class MSCNNMaskedAE(nn.Module):
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         h = self.from_latent(z).view(z.size(0), 128, self.seq_len)
         return self.decoder(h)
+
+    def predict_aging(self, z: torch.Tensor) -> torch.Tensor:
+        return self.aging_head(z).squeeze(-1)
 
     def block_mask(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask a contiguous block covering ``mask_ratio`` of the sequence length."""
@@ -124,7 +134,8 @@ class MSCNNMaskedAE(nn.Module):
         masked, mask = self.block_mask(x)
         z = self.encode(masked)
         recon = self.decode(z)
-        return {"recon": recon, "mask": mask, "latent": z}
+        aging = self.predict_aging(z)
+        return {"recon": recon, "mask": mask, "latent": z, "aging": aging}
 
 
 TemporalMaskedAE = MSCNNMaskedAE
@@ -214,21 +225,55 @@ class CapacityHead(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-def train_mae_epoch(model, loader, optimizer, device, max_grad_norm: float = 1.0) -> dict:
+def pairwise_ranking_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Encourage predicted aging scores to preserve order of SOH/life targets."""
+    if pred.numel() < 2:
+        return pred.new_tensor(0.0)
+    # (B,B) pairwise differences
+    dp = pred.unsqueeze(1) - pred.unsqueeze(0)
+    dt = target.unsqueeze(1) - target.unsqueeze(0)
+    # Only pairs with clear target order
+    mask = (dt.abs() > 1e-3).float()
+    if mask.sum() < 1:
+        return pred.new_tensor(0.0)
+    # Want sign(dp) == sign(dt): hinge on -dp*sign(dt)
+    loss = F.relu(0.05 - dp * torch.sign(dt))
+    return (loss * mask).sum() / mask.sum().clamp(min=1.0)
+
+
+def train_mae_epoch(
+    model,
+    loader,
+    optimizer,
+    device,
+    max_grad_norm: float = 1.0,
+    lambda_aging: float = 0.25,
+    lambda_rank: float = 0.1,
+) -> dict:
     model.train()
-    totals = {"mse": 0.0, "smooth": 0.0, "loss": 0.0}
+    totals = {"mse": 0.0, "smooth": 0.0, "aging": 0.0, "rank": 0.0, "loss": 0.0}
     n = 0
     for batch in loader:
-        x = batch[0].to(device)
+        if len(batch) == 1:
+            x = batch[0].to(device)
+            aging_t = None
+        else:
+            x = batch[0].to(device)
+            aging_t = batch[1].to(device)
         out = model(x)
         mask = out["mask"]
         recon = out["recon"]
-        # Emphasize masked spans, keep a light visible-token term for stable latents
         mse_m = ((recon - x) ** 2 * (1.0 - mask)).sum() / (1.0 - mask).sum().clamp(min=1.0)
         mse_v = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
         mse = 0.85 * mse_m + 0.15 * mse_v
         smooth = torch.mean((recon[:, :, 1:] - recon[:, :, :-1]) ** 2)
         loss = mse + 0.05 * smooth
+        aging_l = x.new_tensor(0.0)
+        rank_l = x.new_tensor(0.0)
+        if aging_t is not None and hasattr(model, "aging_head"):
+            aging_l = F.smooth_l1_loss(out["aging"], aging_t)
+            rank_l = pairwise_ranking_loss(out["aging"], aging_t)
+            loss = loss + lambda_aging * aging_l + lambda_rank * rank_l
         optimizer.zero_grad()
         loss.backward()
         if max_grad_norm > 0:
@@ -236,6 +281,8 @@ def train_mae_epoch(model, loader, optimizer, device, max_grad_norm: float = 1.0
         optimizer.step()
         totals["mse"] += float(mse.item()) * x.size(0)
         totals["smooth"] += float(smooth.item()) * x.size(0)
+        totals["aging"] += float(aging_l.item()) * x.size(0)
+        totals["rank"] += float(rank_l.item()) * x.size(0)
         totals["loss"] += float(loss.item()) * x.size(0)
         n += x.size(0)
     return {k: v / max(n, 1) for k, v in totals.items()}
