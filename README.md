@@ -5,8 +5,8 @@
 | 模块 | 目录 | 内容 |
 |------|------|------|
 | 论文复现 | `battery_pipeline/` | 统计特征 + SVR/XGBoost/TL2 |
-| **研究内容一** | `research_mae/` | MS-CNN MAE + 门控融合 → 退化特征 `.npy` |
-| **研究内容二** | `research_rul/` | Quantile TCN + Pinball Loss + 单调惩罚 → RUL |
+| **研究内容一** | `research_mae/` | Hybrid Dilated MS-CNN MAE + 门控融合 → 退化特征 `.npy` |
+| **研究内容二** | `research_rul/` | Quantile TCN + Pinball/单调惩罚 + 区间校准 → RUL |
 
 ```
 研究内容一（特征）  →  融合特征 .npy
@@ -27,12 +27,14 @@
 ├── research_mae/               # 研究内容一
 │   ├── run_all.py              # MAE + 融合 + 特征导出 + Fig 1–5
 │   ├── thesis_figures.py       # 论文规格图表
+│   ├── models.py               # Hybrid Dilated MS-CNN MAE + 门控融合
 │   ├── cc_filter.py            # D1 CC 突变剔除
 │   ├── features/               # dataset_*_fused.npy
-│   ├── figures/                # Fig 1–5
+│   ├── figures/                # Fig 1–5、Fig 10
 │   └── RESEARCH_CONTENT_1.md   # 详细说明
 ├── research_rul/               # 研究内容二
 │   ├── run_all.py              # Quantile TCN + Fig 6–9
+│   ├── quantile_tcn.py         # 掩码注意力 Quantile TCN
 │   ├── figures/                # Fig 6–9
 │   └── RESEARCH_CONTENT_2.md   # 详细说明
 ├── run_research.py             # 研究内容一 + 二 一键运行
@@ -54,6 +56,14 @@ conda activate battery-capacity
 
 主要依赖：`numpy`、`pandas`、`scikit-learn`、`torch`、`matplotlib`、`scipy`。
 
+**GPU 提示**：驱动最高支持 CUDA 12.8 时，请安装匹配的 PyTorch（如 `cu128`），而不是 `cu130`。训练前建议：
+
+```bash
+conda activate battery-capacity
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+python research_mae/run_all.py --device cuda
+```
+
 ---
 
 ## 一键运行（研究内容一 + 二）
@@ -63,20 +73,20 @@ conda activate battery-capacity
 cd /path/to/data-driven-capacity-estimation-from-voltage-relaxation
 
 # 完整流程：数据缓存 → MAE → 融合 → 特征导出 → RUL 训练 → 全部图表
-python run_research.py --rebuild-data --device cpu
+python run_research.py --rebuild-data --device cuda   # 或 cpu
 ```
 
 分步运行：
 
 ```bash
-# 仅研究内容一
-python research_mae/run_all.py --rebuild-data --device cpu
+# 仅研究内容一（5-seed 融合集成）
+python research_mae/run_all.py --device cuda --fusion-seeds 42,43,44,45,46
 
-# 仅研究内容二（需先完成特征导出）
-python research_rul/run_all.py --device cpu
+# 仅研究内容二（需先完成特征导出；含 3-seed RUL 集成）
+python research_rul/run_all.py --device cuda
 
 # 仅重新出 Fig 6–9
-python research_rul/run_all.py --figures-only --device cpu
+python research_rul/run_all.py --figures-only --device cuda
 ```
 
 ---
@@ -88,7 +98,10 @@ python research_rul/run_all.py --figures-only --device cpu
 ```
 原始 CSV
   → 满充后弛豫 ΔV 序列（D1/D2: 32 点，D3: 64 点）
-  → MS-CNN 掩码自编码器（30% 掩码无监督）→ 32 维隐向量
+  → Hybrid Dilated MS-CNN MAE
+       · 并行分支：kernel 3/5/7 + dilation 2/4 + 残差
+       · 30% 连续块掩码；掩码区主导重构损失
+       · Avg+Max 双池化 → 32 维隐向量
   → 门控通道融合 [弛豫隐向量, CC 充电时间]
   → 融合特征 f → 导出 .npy（模块解耦）
 ```
@@ -99,23 +112,24 @@ python research_rul/run_all.py --figures-only --device cpu
 
 | 方法 | Test RMSE% | R² |
 |------|------------|-----|
-| **D1 集成（3 seeds）** | **0.55%** | 0.992 |
-| D1 单模型 | 0.67% | 0.986 |
+| **D1 集成（5 seeds）** | **0.43%** | 0.995 |
+| D1 单模型 | 0.50% | 0.993 |
+| Latent Ridge | 2.65% | 0.800 |
 | 论文 SVR 基线 | ~1.02% | — |
-| D2 原生留出 | **0.33%** | 0.996 |
-| D3 原生留出 | 0.89% | 0.990 |
+| D2 原生留出 | **0.23%** | 0.998 |
+| D3 原生留出 | **0.60%** | 0.996 |
 
-### 图表（Fig 1–5）
+### 图表（Fig 1–5、Fig 10）
 
-#### Fig 1 — 弛豫电压提取（Dataset 1，绝对电压，老化渐变）
+#### Fig 1 — 弛豫电压（Dataset 1，每隔 20 圈一条，蓝→红渐变）
 
 ![Fig 1](research_mae/figures/fig1_relaxation_voltage.png)
 
-#### Fig 2 — 恒流充电时间退化（Dataset 1，CC 突变已剔除）
+#### Fig 2 — 三数据集 CC 充电时间对比（a/b/c）
 
-![Fig 2](research_mae/figures/fig2_cc_time_dataset1.png)
+![Fig 2](research_mae/figures/fig2_cc_time_all_datasets.png)
 
-#### Fig 3 — MS-CNN MAE 掩码重构（D1 / D2 / D3，初·中·末期）
+#### Fig 3 — Hybrid Dilated MS-CNN MAE 重构（**30% 连续块掩码**）
 
 ![Fig 3](research_mae/figures/fig3_mae_reconstruction.png)
 
@@ -127,6 +141,10 @@ python research_rul/run_all.py --figures-only --device cpu
 
 ![Fig 5](research_mae/figures/fig5_channel_attention.png)
 
+#### Fig 10 — NCA @ 45°C、0.5C 整圈协议曲线（CC→CV→静置→放电）
+
+![Fig 10](research_mae/figures/fig10_cycle_protocol_nca_cy45.png)
+
 详细说明：[research_mae/RESEARCH_CONTENT_1.md](research_mae/RESEARCH_CONTENT_1.md)
 
 ---
@@ -136,32 +154,36 @@ python research_rul/run_all.py --figures-only --device cpu
 ### 方法
 
 ```
-融合特征序列 [f_1, …, f_i]
-  → Quantile TCN（因果卷积，5%/50%/95% 分位数）
-  → Pinball Loss + 单调递减物理惩罚
-  → RUL 点预测 + 90% 置信区间
+融合特征序列 [f_1, …, f_i]（可选因果 SOH 辅助特征）
+  → Quantile TCN（因果卷积 + 掩码注意力池化，5%/50%/95%）
+  → 加权 Pinball Loss + 单调递减物理惩罚 + 晚期寿命加权 L1
+  → 验证集 conformal 区间校准
+  → 多 seed 集成 → RUL 点预测 + 90% 置信区间
 ```
 
 - **RUL 标签**：EOL = 80% 标称容量，RUL_i = N_EOL − cycle_i；删失电芯剔除
 - **评估划分**：Dataset 1 Strategy D 留出 14 颗测试电芯
+- **消融公平性**：SOH 辅助特征仅用于 fused / concat，单模态基线不使用
 
-### 定量结果（Strategy D 测试集）
+### 定量结果（Strategy D 测试集，3-seed 集成）
 
 | 指标 | 数值 |
 |------|------|
-| **RMSE** | **24.3 圈** |
-| **MAE** | 13.7 圈 |
-| PICP (90%) | 0.49 |
-| PINAW | 0.13 |
+| **RMSE** | **21.2 圈** |
+| **MAE** | 10.9 圈 |
+| PICP (90%) | **0.95** |
+| PINAW | 0.10 |
 
-### 消融实验（Fig 7）
+### 消融实验（Fig 7，单 seed）
 
 | 特征输入 | RMSE (圈) | MAE (圈) |
 |---------|-----------|----------|
-| 仅弛豫 latent | 37.0 | 20.7 |
-| 仅 CC | 29.0 | 15.4 |
-| 拼接 concat | 32.4 | 18.2 |
-| **融合 fused（本文）** | **24.1** | **13.3** |
+| 仅弛豫 latent | 28.8 | 16.8 |
+| 仅 CC | 23.8 | 13.4 |
+| 拼接 concat | 28.3 | 15.4 |
+| **融合 fused** | **24.4** | **12.7** |
+
+主结果 fused **3-seed 集成 RMSE = 21.2**（优于各单 seed / 单模态）。
 
 ### 图表（Fig 6–9）
 
@@ -215,7 +237,7 @@ python run_figures.py --skip-training
 | 弛豫电压段截取 | ✅ 部分脚本 | ✅ |
 | 统计特征 + SVR/XGBoost | ❌ | ✅ `battery_pipeline/` |
 | 迁移学习 TL2 | ❌ | ✅ |
-| MS-CNN MAE + 门控融合 | ❌ | ✅ `research_mae/` |
+| Hybrid Dilated MS-CNN MAE + 门控融合 | ❌ | ✅ `research_mae/` |
 | Quantile TCN RUL 预测 | ❌ | ✅ `research_rul/` |
 
 ---
@@ -223,8 +245,8 @@ python run_figures.py --skip-training
 ## 注意事项
 
 1. **内存**：特征提取流式处理，正常运行 < 2 GB。
-2. **PyTorch**：默认 `--device cpu`；GPU 驱动过旧时请保持 CPU 模式。
-3. **随机性**：Strategy D 划分固定 `random_state=42`；Fusion 集成 seeds `42, 43, 44`。
+2. **PyTorch**：可用 `--device cuda`；若报 CUDA driver 过旧，请换用与驱动匹配的 wheel（如 cu128），并设置 `LD_LIBRARY_PATH=$CONDA_PREFIX/lib`。
+3. **随机性**：Strategy D 划分固定 `random_state=42`；Fusion 集成 seeds `42–46`；RUL 集成 seeds `42–44`。
 4. **数据重建**：序列维度变更或 CC 过滤更新后，需 `--rebuild-data` 重建缓存。
 
 ---

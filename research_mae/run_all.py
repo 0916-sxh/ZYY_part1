@@ -40,7 +40,7 @@ def parse_args():
     p.add_argument("--epochs-fusion", type=int, default=150)
     p.add_argument("--device", default="cpu", help="cpu or cuda")
     p.add_argument("--skip-train", action="store_true")
-    p.add_argument("--fusion-seeds", default="42,43,44", help="Comma-separated seeds for D1 ensemble")
+    p.add_argument("--fusion-seeds", default="42,43,44,45,46", help="Comma-separated seeds for D1 ensemble")
     p.add_argument("--skip-mae", action="store_true")
     return p.parse_args()
 
@@ -67,14 +67,14 @@ def main():
             model_short = load_mae("short", SEQ_SHORT, device=device)
             model_long = load_mae("long", SEQ_LONG, device=device)
         else:
-            print("\n=== Step 2: Train MS-CNN MAE ===")
+            print("\n=== Step 2: Train Hybrid Dilated MS-CNN MAE ===")
             dv_short = np.vstack([d1["delta_v"], d2["delta_v"]])
             cells_short = np.concatenate([d1["cell_id"], d2["cell_id"]])
             model_short, h1 = train_mae(
-                dv_short, SEQ_SHORT, "short", args.epochs_mae, cell_ids=cells_short, device=device
+                dv_short, SEQ_SHORT, "short", args.epochs_mae, cell_ids=cells_short, device=device, patience=20
             )
             model_long, h2 = train_mae(
-                d3["delta_v"], SEQ_LONG, "long", args.epochs_mae, cell_ids=d3["cell_id"], device=device
+                d3["delta_v"], SEQ_LONG, "long", args.epochs_mae, cell_ids=d3["cell_id"], device=device, patience=20
             )
             histories.extend([h1, h2])
 

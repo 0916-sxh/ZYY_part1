@@ -1,4 +1,4 @@
-"""MS-CNN masked autoencoder + channel-attention multimodal fusion."""
+"""Hybrid Dilated MS-CNN masked autoencoder + gated multimodal fusion."""
 
 from __future__ import annotations
 
@@ -20,44 +20,72 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 
-class MSConvBlock(nn.Module):
-    """Parallel conv branches (kernels 3/5/7) for multi-scale temporal patterns."""
+class DilatedMSConvBlock(nn.Module):
+    """Hybrid multi-scale block: local kernels + dilated kernels, with residual.
 
-    def __init__(self, in_ch: int, out_ch: int, kernels: tuple[int, ...] = (3, 5, 7)):
+    Branches cover both short-range polarization shapes (kernels 3/5/7) and
+    longer contexts via dilated kernel-3 (dilation 2/4), then 1×1 merge.
+    """
+
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        kernels: tuple[int, ...] = (3, 5, 7),
+        dilations: tuple[int, ...] = (2, 4),
+    ):
         super().__init__()
-        branch_ch = max(out_ch // len(kernels), 8)
+        specs: list[tuple[int, int]] = [(k, 1) for k in kernels] + [(3, d) for d in dilations]
+        branch_ch = max(out_ch // len(specs), 8)
         self.branches = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Conv1d(in_ch, branch_ch, k, padding=k // 2),
+                    nn.Conv1d(in_ch, branch_ch, k, padding=d * (k // 2), dilation=d),
                     nn.BatchNorm1d(branch_ch),
                     nn.GELU(),
                 )
-                for k in kernels
+                for k, d in specs
             ]
         )
-        self.merge = nn.Conv1d(branch_ch * len(kernels), out_ch, kernel_size=1)
+        self.merge = nn.Sequential(
+            nn.Conv1d(branch_ch * len(specs), out_ch, kernel_size=1),
+            nn.BatchNorm1d(out_ch),
+            nn.GELU(),
+        )
+        self.skip = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.merge(torch.cat([b(x) for b in self.branches], dim=1))
+        y = self.merge(torch.cat([b(x) for b in self.branches], dim=1))
+        return y + self.skip(x)
+
+
+# Backward-compatible name
+MSConvBlock = DilatedMSConvBlock
 
 
 class MSCNNMaskedAE(nn.Module):
-    """Multi-scale 1D-CNN masked autoencoder for relaxation ΔV sequences."""
+    """Dilated / hybrid multi-scale 1D-CNN masked autoencoder for ΔV sequences."""
 
-    def __init__(self, seq_len: int = 32, latent_dim: int = 32, mask_ratio: float = 0.3):
+    def __init__(
+        self,
+        seq_len: int = 32,
+        latent_dim: int = 32,
+        mask_ratio: float = 0.3,
+        dilations: tuple[int, ...] = (2, 4),
+    ):
         super().__init__()
         self.seq_len = seq_len
         self.latent_dim = latent_dim
         self.mask_ratio = mask_ratio
+        self.dilations = dilations
 
-        self.encoder = nn.Sequential(
-            MSConvBlock(1, 32),
-            MSConvBlock(32, 64),
-            MSConvBlock(64, 128),
-            nn.AdaptiveAvgPool1d(1),
+        self.encoder_stem = nn.Sequential(
+            DilatedMSConvBlock(1, 32, dilations=dilations),
+            DilatedMSConvBlock(32, 64, dilations=dilations),
+            DilatedMSConvBlock(64, 128, dilations=dilations),
         )
-        self.to_latent = nn.Linear(128, latent_dim)
+        # Dual pooling preserves both average trend and peak polarization
+        self.to_latent = nn.Linear(256, latent_dim)
         self.from_latent = nn.Linear(latent_dim, 128 * seq_len)
 
         self.decoder = nn.Sequential(
@@ -68,39 +96,42 @@ class MSCNNMaskedAE(nn.Module):
         )
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.encoder(x).squeeze(-1)
-        return self.to_latent(h)
+        h = self.encoder_stem(x)
+        avg = F.adaptive_avg_pool1d(h, 1).squeeze(-1)
+        mx = F.adaptive_max_pool1d(h, 1).squeeze(-1)
+        return self.to_latent(torch.cat([avg, mx], dim=-1))
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         h = self.from_latent(z).view(z.size(0), 128, self.seq_len)
         return self.decoder(h)
 
-    def random_mask(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def block_mask(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Mask a contiguous block covering ``mask_ratio`` of the sequence length."""
         b, _, length = x.shape
-        n_mask = max(1, int(length * self.mask_ratio))
-        mask = torch.ones(b, length, device=x.device)
+        n_mask = max(1, int(round(length * self.mask_ratio)))
+        n_mask = min(n_mask, length)
+        mask = torch.ones(b, 1, length, device=x.device)
+        max_start = length - n_mask
         for i in range(b):
-            idx = torch.randperm(length, device=x.device)[:n_mask]
-            mask[i, idx] = 0.0
-        mask = mask.unsqueeze(1)
+            start = int(torch.randint(0, max_start + 1, (1,), device=x.device).item())
+            mask[i, 0, start : start + n_mask] = 0.0
         return x * mask, mask
 
+    def random_mask(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.block_mask(x)
+
     def forward(self, x: torch.Tensor) -> dict:
-        masked, mask = self.random_mask(x)
+        masked, mask = self.block_mask(x)
         z = self.encode(masked)
         recon = self.decode(z)
         return {"recon": recon, "mask": mask, "latent": z}
 
 
-# Backward-compatible alias
 TemporalMaskedAE = MSCNNMaskedAE
 
 
 class ChannelAttentionFusion(nn.Module):
-    """
-    Softmax channel attention over relaxation latent vs CC macro features.
-    Weights sum to 1 and adapt to the current aging stage.
-    """
+    """Softmax channel attention over relaxation latent vs CC macro features."""
 
     def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2, temperature: float = 1.0):
         super().__init__()
@@ -130,7 +161,7 @@ class ChannelAttentionFusion(nn.Module):
 
 
 class GatedChannelFusion(nn.Module):
-    """Legacy sigmoid gates (kept for loading old checkpoints)."""
+    """Independent sigmoid gates (production fusion)."""
 
     def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2):
         super().__init__()
@@ -160,16 +191,17 @@ class GatedChannelFusion(nn.Module):
 class CapacityHead(nn.Module):
     """Predict capacity from fused features + skip connections."""
 
-    def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2, dropout: float = 0.1):
+    def __init__(self, latent_dim: int = 32, cc_feat_dim: int = 2, dropout: float = 0.05):
         super().__init__()
         in_dim = latent_dim * 2 + cc_feat_dim
         self.net = nn.Sequential(
-            nn.Linear(in_dim, latent_dim),
+            nn.Linear(in_dim, latent_dim * 2),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(latent_dim, latent_dim // 2),
+            nn.Linear(latent_dim * 2, latent_dim),
             nn.GELU(),
-            nn.Linear(latent_dim // 2, 1),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim, 1),
         )
 
     def forward(
@@ -191,7 +223,10 @@ def train_mae_epoch(model, loader, optimizer, device, max_grad_norm: float = 1.0
         out = model(x)
         mask = out["mask"]
         recon = out["recon"]
-        mse = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
+        # Emphasize masked spans, keep a light visible-token term for stable latents
+        mse_m = ((recon - x) ** 2 * (1.0 - mask)).sum() / (1.0 - mask).sum().clamp(min=1.0)
+        mse_v = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
+        mse = 0.85 * mse_m + 0.15 * mse_v
         smooth = torch.mean((recon[:, :, 1:] - recon[:, :, :-1]) ** 2)
         loss = mse + 0.05 * smooth
         optimizer.zero_grad()

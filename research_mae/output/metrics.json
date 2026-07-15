@@ -7,35 +7,35 @@
       "test_samples": 5635
     },
     "test_rmse_pct": {
-      "fusion_attention": 0.5479237147739955,
-      "fusion_single": 0.6737430572509765,
-      "latent_ridge": 3.6272554670061385,
+      "fusion_attention": 0.43070899418422154,
+      "fusion_single": 0.4984059470040458,
+      "latent_ridge": 2.654065159388951,
       "cc_ridge": 5.713654436383928,
-      "latent_cc_ridge": 3.6023252214704238
+      "latent_cc_ridge": 2.6197374616350446
     },
     "test_r2": {
-      "fusion_attention": 0.9914827942848206,
-      "fusion_single": 0.987122118473053,
-      "latent_ridge": 0.6267393231391907,
+      "fusion_attention": 0.9947370886802673,
+      "fusion_single": 0.9929527044296265,
+      "latent_ridge": 0.8001615405082703,
       "cc_ridge": 0.0738445520401001,
-      "latent_cc_ridge": 0.6318525671958923
+      "latent_cc_ridge": 0.8052974939346313
     }
   },
   "transfer": {
     "dataset_2_zero_shot": {
       "dataset": 2,
       "n_samples": 27803,
-      "fusion_rmse_pct": 1.4231470380510602,
-      "fusion_r2": 0.9376294612884521,
-      "latent_ridge_rmse_pct": 1.660187748500279,
-      "latent_ridge_r2": 0.9151221513748169
+      "fusion_rmse_pct": 1.4468089512416296,
+      "fusion_r2": 0.9355382323265076,
+      "latent_ridge_rmse_pct": 1.4911507742745536,
+      "latent_ridge_r2": 0.9315264225006104
     },
     "dataset_2_tl": {
       "finetune_samples": 23,
       "eval_samples": 27780,
-      "zero_shot_rmse_pct": 1.423686327253069,
-      "tl_finetune_rmse_pct": 2.4666272844587054,
-      "tl_finetune_r2": 0.8127811551094055,
+      "zero_shot_rmse_pct": 1.447362082345145,
+      "tl_finetune_rmse_pct": 2.4784177507672993,
+      "tl_finetune_r2": 0.8109870553016663,
       "finetune_cells": {
         "CY25-05_1": "CY25-05_1-#11",
         "CY35-05_1": "CY35-05_1-#4",
@@ -45,18 +45,18 @@
     "dataset_2_native": {
       "dataset": 2,
       "n_val_samples": 4318,
-      "fusion_rmse_pct": 0.32704685756138396,
-      "fusion_r2": 0.9963588714599609,
-      "latent_ridge_rmse_pct": 1.629776872907366,
-      "latent_ridge_r2": 0.9095779061317444
+      "fusion_rmse_pct": 0.22636912209647045,
+      "fusion_r2": 0.9982555508613586,
+      "latent_ridge_rmse_pct": 1.7701239449637276,
+      "latent_ridge_r2": 0.8933340907096863
     },
     "dataset_3": {
       "dataset": 3,
       "n_val_samples": 922,
-      "fusion_rmse_pct": 0.8938345336914063,
-      "fusion_r2": 0.9902739524841309,
-      "latent_ridge_rmse_pct": 2.3332371520996094,
-      "latent_ridge_r2": 0.93372642993927
+      "fusion_rmse_pct": 0.6022925186157226,
+      "fusion_r2": 0.9955838918685913,
+      "latent_ridge_rmse_pct": 1.5111853027343751,
+      "latent_ridge_r2": 0.9721991419792175
     }
   }
 }

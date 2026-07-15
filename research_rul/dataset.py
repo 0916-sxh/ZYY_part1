@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 
 from research_mae.export_features import load_fused_features
 from research_mae.features import build_cc_features, normalize_cc_features
-from research_rul.rul_labels import RULTable, RUL_SCALE, build_rul_table
+from research_rul.rul_labels import NOMINAL_AH, RUL_SCALE, build_rul_table
 
 
 class FeatureMode(str, Enum):
@@ -27,22 +27,51 @@ def _feature_matrix(
     cc_time: np.ndarray,
     cell_ids: np.ndarray,
     cycles: np.ndarray,
+    capacity: np.ndarray,
+    dataset_id: int,
     cc_mean: float,
     cc_std: float,
+    with_aux: bool = True,
 ) -> np.ndarray:
+    """Base modality features + optional causal SOH auxiliaries."""
     if mode == FeatureMode.FUSED:
-        return fused
-    if mode == FeatureMode.LATENT:
-        return latent
-    if mode == FeatureMode.CC:
-        cc = build_cc_features(cc_time, cell_ids, cycles, cc_mean, cc_std)
-        return cc
-    cc = normalize_cc_features(
-        build_cc_features(cc_time, cell_ids, cycles, cc_mean, cc_std),
-        np.zeros(2, dtype=np.float32),
-        np.ones(2, dtype=np.float32),
-    )
-    return np.concatenate([latent, cc], axis=1)
+        base = fused
+    elif mode == FeatureMode.LATENT:
+        base = latent
+    elif mode == FeatureMode.CC:
+        base = build_cc_features(cc_time, cell_ids, cycles, cc_mean, cc_std)
+    else:
+        cc = normalize_cc_features(
+            build_cc_features(cc_time, cell_ids, cycles, cc_mean, cc_std),
+            np.zeros(2, dtype=np.float32),
+            np.ones(2, dtype=np.float32),
+        )
+        base = np.concatenate([latent, cc], axis=1)
+
+    if not with_aux:
+        return base.astype(np.float32)
+
+    # Aux only intended for fused / concat multimodal paths (keeps ablation fair).
+    nom = NOMINAL_AH[dataset_id] * 1000.0
+    soh = (capacity / nom).astype(np.float32)
+    d_soh = np.zeros_like(soh)
+    fade = np.zeros_like(soh)
+    for cell in np.unique(cell_ids):
+        m = cell_ids == cell
+        order = np.argsort(cycles[m])
+        idxs = np.where(m)[0][order]
+        s = soh[idxs]
+        ds = np.zeros_like(s)
+        ds[1:] = s[1:] - s[:-1]
+        d_soh[idxs] = ds
+        fr = np.zeros_like(s)
+        for i in range(len(s)):
+            j0 = max(0, i - 9)
+            if i > j0:
+                fr[i] = (s[j0] - s[i]) / float(i - j0)
+        fade[idxs] = fr
+    aux = np.stack([soh, d_soh * 100.0, fade * 100.0], axis=1)
+    return np.concatenate([base, aux], axis=1).astype(np.float32)
 
 
 class RULSequenceDataset(Dataset):
@@ -58,7 +87,12 @@ class RULSequenceDataset(Dataset):
         feature_mode: FeatureMode = FeatureMode.FUSED,
         max_len: int = 64,
         min_cycle_idx: int = 1,
+        use_log_rul: bool = False,
+        with_aux: bool | None = None,
     ):
+        if with_aux is None:
+            # Keep unimodal ablations clean: aux only on multimodal fused/concat.
+            with_aux = feature_mode in (FeatureMode.FUSED, FeatureMode.CONCAT)
         raw = load_fused_features(dataset_id)
         table = build_rul_table(
             raw["cell_id"], raw["cycle"], raw["capacity"], dataset_id, exclude_censored=True
@@ -72,8 +106,11 @@ class RULSequenceDataset(Dataset):
             raw["cc_time_s"],
             raw["cell_id"],
             raw["cycle"],
+            raw["capacity"],
+            dataset_id,
             cc_mean,
             cc_std,
+            with_aux=with_aux,
         )
 
         self.samples: list[tuple[np.ndarray, float]] = []
@@ -81,6 +118,7 @@ class RULSequenceDataset(Dataset):
         self.cycles: list[int] = []
         self.feat_dim = feats.shape[1]
         self.max_len = max_len
+        self.use_log_rul = use_log_rul
 
         for cell in np.unique(raw["cell_id"]):
             if cell_ids_keep is not None and str(cell) not in cell_ids_keep:
@@ -98,7 +136,12 @@ class RULSequenceDataset(Dataset):
                 seq = feats[idxs[: j + 1]]
                 if len(seq) > max_len:
                     seq = seq[-max_len:]
-                self.samples.append((seq.astype(np.float32), float(table.rul[gi]) / RUL_SCALE))
+                rul = float(table.rul[gi])
+                if use_log_rul:
+                    y = float(np.log1p(rul) / np.log1p(RUL_SCALE))
+                else:
+                    y = rul / RUL_SCALE
+                self.samples.append((seq.astype(np.float32), y))
                 self.cell_ids.append(str(cell))
                 self.cycles.append(int(raw["cycle"][gi]))
 
@@ -131,10 +174,15 @@ def collate_rul(batch: list[dict]) -> dict:
     }
 
 
-def cell_level_split(cells: list[str], val_frac: float = 0.15, seed: int = 42) -> tuple[set[str], set[str]]:
-    rng = np.random.default_rng(seed)
-    uniq = sorted(set(cells))
-    n_val = max(1, int(len(uniq) * val_frac))
-    val = set(rng.choice(uniq, size=n_val, replace=False).tolist())
-    train = set(c for c in uniq if c not in val)
-    return train, val
+def decode_rul(y_norm: np.ndarray | torch.Tensor, use_log_rul: bool = False) -> np.ndarray:
+    """Map normalized network outputs back to RUL cycles."""
+    import torch as _torch
+
+    is_t = isinstance(y_norm, _torch.Tensor)
+    y = y_norm.detach().cpu().numpy() if is_t else np.asarray(y_norm)
+    y = np.clip(y, 0.0, None)
+    if use_log_rul:
+        out = np.expm1(y * np.log1p(RUL_SCALE))
+    else:
+        out = y * RUL_SCALE
+    return np.clip(out, 0.0, None).astype(np.float32)

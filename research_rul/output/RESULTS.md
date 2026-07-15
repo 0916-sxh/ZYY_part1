@@ -1,7 +1,7 @@
 # Research RUL – Results Summary
-- Main TCN (fused): RMSE **24.3** cycles, MAE 13.7, PICP 0.485
+- Main TCN (fused): RMSE **21.2** cycles, MAE 10.9, PICP 0.951
 ## Ablation (Strategy D test)
-- latent: RMSE 37.0, MAE 20.7
-- cc: RMSE 29.0, MAE 15.4
-- concat: RMSE 32.4, MAE 18.2
-- fused: RMSE 24.1, MAE 13.3
+- latent: RMSE 28.8, MAE 16.8
+- cc: RMSE 23.8, MAE 13.4
+- concat: RMSE 28.3, MAE 15.4
+- fused: RMSE 24.4, MAE 12.7

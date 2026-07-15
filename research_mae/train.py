@@ -52,7 +52,9 @@ def _mae_val_loss(model: MSCNNMaskedAE, loader: DataLoader, device: str) -> floa
         out = model(x)
         mask = out["mask"]
         recon = out["recon"]
-        mse = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
+        mse_m = ((recon - x) ** 2 * (1.0 - mask)).sum() / (1.0 - mask).sum().clamp(min=1.0)
+        mse_v = ((recon - x) ** 2 * mask).sum() / mask.sum().clamp(min=1.0)
+        mse = 0.85 * mse_m + 0.15 * mse_v
         total += float(mse.item()) * x.size(0)
         n += x.size(0)
     return total / max(n, 1)
@@ -215,12 +217,12 @@ def train_fusion(
     )
 
     fusion = GatedChannelFusion(latent_dim=latent_dim, cc_feat_dim=2).to(device)
-    head = CapacityHead(latent_dim=latent_dim, cc_feat_dim=2, dropout=0.03).to(device)
+    head = CapacityHead(latent_dim=latent_dim, cc_feat_dim=2, dropout=0.05).to(device)
     opt = torch.optim.AdamW(
-        list(fusion.parameters()) + list(head.parameters()), lr=6e-4, weight_decay=1e-4
+        list(fusion.parameters()) + list(head.parameters()), lr=8e-4, weight_decay=5e-5
     )
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
-    loss_fn = nn.SmoothL1Loss(beta=0.02)
+    loss_fn = nn.SmoothL1Loss(beta=0.015)
     history = TrainHistory(name=f"fusion_{name}" + (f"_s{seed}" if seed != 42 else ""))
 
     best_val_rmse = float("inf")

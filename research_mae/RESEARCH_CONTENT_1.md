@@ -43,16 +43,16 @@
 3. 截取固定时长（D1/D2: 30 min；D3: 60 min），均匀重采样为 **32 / 64** 个时间点
 4. 计算 **ΔV = V(t) − V(t₀)**，并做全局 z-score 归一化（μ、σ 存入 cache）
 
-### 3.2 MS-CNN 掩码自编码器（MAE）
+### 3.2 Dilated MS-CNN 掩码自编码器（MAE）
 
-**实现文件**：`models.py` → `MSCNNMaskedAE`
+**实现文件**：`models.py` → `MSCNNMaskedAE`（编码器为 `DilatedMSConvBlock`）
 
 | 组件 | 配置 |
 |------|------|
-| 编码器 | 3 层 **MSConvBlock**（并行 kernel=3/5/7 → 1×1 合并）→ GAP → Linear |
+| 编码器 | 3 层 **Hybrid DilatedMSConvBlock**（kernel 3/5/7 + dilation 2/4，残差）→ Avg+Max 池化 → Linear |
 | 隐向量维度 | **32** |
 | 解码器 | Linear → Conv1d 反卷积栈 → 重构 ΔV |
-| 掩码比例 | **30%** 时间步随机置零 |
+| 掩码比例 | **30% 连续块掩码**（随机起点的一段连续时间步，非整点随机置零） |
 | 损失 | 掩码位置 MSE + **0.05×平滑正则** |
 
 **训练策略**：
@@ -214,7 +214,7 @@ data = load_fused_features(dataset_id=1)
 |---------|---------|
 | 固定维度弛豫序列（32/64） | ✅ `data_extract.py` |
 | MS-CNN 掩码自编码器 | ✅ `MSCNNMaskedAE` |
-| 30% 随机掩码无监督训练 | ✅ |
+| 30% 连续块掩码无监督训练 | ✅ `block_mask()` |
 | 编码器提取隐向量 | ✅ `encode()` |
 | 静态 .npy 特征文件 | ✅ `export_features.py` |
 | t-SNE 老化流形 | ✅ Fig 4 |

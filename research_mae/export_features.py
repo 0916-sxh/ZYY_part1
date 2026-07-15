@@ -110,7 +110,7 @@ def export_dataset_features(
             "fused": list(feats["fused"].shape),
             "latent": list(feats["latent"].shape),
         },
-        "description": "Research content 1: MS-CNN latent + channel-attention fused features",
+        "description": "Research content 1: Dilated MS-CNN latent + channel-attention fused features",
     }
     manifest_path = out_dir / f"{prefix}_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

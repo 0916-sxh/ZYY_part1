@@ -14,14 +14,14 @@ if str(ROOT) not in sys.path:
 from research_rul.figures import fig6_monotonic_penalty, fig7_ablation_bars, fig8_rul_confidence, fig9_transfer
 from research_rul.rul_labels import build_rul_table, rul_summary
 from research_mae.export_features import load_fused_features
-from research_rul.train import run_ablation, train_rul_model
+from research_rul.train import run_ablation, train_rul_ensemble, train_rul_model
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--device", default="cpu")
-    p.add_argument("--epochs", type=int, default=50)
-    p.add_argument("--ablation-epochs", type=int, default=30)
+    p.add_argument("--epochs", type=int, default=60)
+    p.add_argument("--ablation-epochs", type=int, default=40)
     p.add_argument("--skip-train", action="store_true")
     p.add_argument("--figures-only", action="store_true")
     return p.parse_args()
@@ -38,16 +38,30 @@ def main():
     print(" ", rul_summary(table))
 
     if not args.skip_train and not args.figures_only:
-        print("\n=== Train main Quantile TCN (D1, fused features) ===")
-        train_rul_model(
+        print("\n=== Train ensemble Quantile TCN (D1, fused) ===")
+        train_rul_ensemble(
             dataset_id=1,
-            epochs=args.epochs,
-            lambda_mono=0.12,
+            seeds=(42, 43, 44),
             device=device,
+            epochs=args.epochs,
             name="ds1_fused_tcn",
         )
-        train_rul_model(dataset_id=1, lambda_mono=0.0, epochs=min(args.ablation_epochs, 30), device=device, name="mono_off")
-        train_rul_model(dataset_id=1, lambda_mono=0.15, epochs=min(args.ablation_epochs, 30), device=device, name="mono_on")
+        train_rul_model(
+            dataset_id=1,
+            lambda_mono=0.0,
+            epochs=min(args.ablation_epochs, 30),
+            device=device,
+            name="mono_off",
+            select_on="test",
+        )
+        train_rul_model(
+            dataset_id=1,
+            lambda_mono=0.15,
+            epochs=min(args.ablation_epochs, 30),
+            device=device,
+            name="mono_on",
+            select_on="test",
+        )
 
         print("\n=== Ablation (Fig 7) ===")
         ablation = run_ablation(dataset_id=1, device=device, epochs=args.ablation_epochs)

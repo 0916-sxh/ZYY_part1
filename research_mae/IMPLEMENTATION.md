@@ -60,9 +60,9 @@
 
 | 组件 | 配置 |
 |------|------|
-| Encoder | **MSConvBlock** ×3（并行 kernel 3/5/7）→ GAP → Linear → **32 维**隐向量 |
+| Encoder | **DilatedMSConvBlock** ×3（并行 dilation 1/2/4、kernel=3）→ GAP → Linear → **32 维**隐向量 |
 | Decoder | Linear → Conv1d 128→64→32→16→1 |
-| 掩码比例 | 30% 时间步随机置零 |
+| 掩码比例 | **30% 连续块**（随机起点的一段连续时间步） |
 | 损失 | 掩码位置 MSE + **0.05×平滑正则** |
 
 序列维度：D1/D2 **32 点**（30 min），D3 **64 点**（60 min）。

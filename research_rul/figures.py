@@ -10,8 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from research_mae.export_features import load_fused_features
-from research_rul.dataset import FeatureMode, RULSequenceDataset, collate_rul
-from research_rul.rul_labels import RUL_SCALE
+from research_rul.dataset import FeatureMode, RULSequenceDataset, collate_rul, decode_rul
 from research_rul.train import load_rul_model, strategy_d_split, train_rul_model
 
 FIG_DIR = Path(__file__).resolve().parent / "figures"
@@ -43,22 +42,26 @@ def predict_cell_rul_trajectory(
     cell_id: str,
     device: str = "cpu",
     feature_mode: FeatureMode = FeatureMode.FUSED,
+    use_log_rul: bool = True,
+    expand: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    ds = RULSequenceDataset(dataset_id, cell_ids_keep={cell_id}, feature_mode=feature_mode)
+    ds = RULSequenceDataset(
+        dataset_id, cell_ids_keep={cell_id}, feature_mode=feature_mode, use_log_rul=use_log_rul
+    )
     loader = DataLoader(ds, batch_size=len(ds), shuffle=False, collate_fn=collate_rul)
     batch = next(iter(loader))
     x = batch["x"].to(device)
-    pred = model(x).cpu().numpy()
+    mask = batch["mask"].to(device)
+    pred = model(x, mask).cpu().numpy()
     cycles = batch["cycle"].numpy()
     order = np.argsort(cycles)
-    y_true = np.array([float(ds.samples[i][1]) for i in range(len(ds))])[order] * RUL_SCALE
-    return (
-        cycles[order],
-        y_true,
-        pred[order, 0] * RUL_SCALE,
-        pred[order, 1] * RUL_SCALE,
-        pred[order, 2] * RUL_SCALE,
-    )
+    y_true = decode_rul(np.array([float(ds.samples[i][1]) for i in range(len(ds))]), use_log_rul)[
+        order
+    ]
+    lo = np.clip(decode_rul(pred[:, 0], use_log_rul) - expand, 0.0, None)
+    med = decode_rul(pred[:, 1], use_log_rul)
+    hi = decode_rul(pred[:, 2], use_log_rul) + expand
+    return cycles[order], y_true, lo[order], med[order], hi[order]
 
 
 def fig6_monotonic_penalty(
@@ -76,11 +79,25 @@ def fig6_monotonic_penalty(
         train_rul_model(dataset_id, lambda_mono=0.15, epochs=epochs, device=device, name="mono_on")
     _, test_cells = strategy_d_split(dataset_id)
     test_cell = sorted(test_cells)[0]
-    m_off, _ = load_rul_model("mono_off", device)
-    m_on, _ = load_rul_model("mono_on", device)
+    m_off, ck_off = load_rul_model("mono_off", device)
+    m_on, ck_on = load_rul_model("mono_on", device)
 
-    cyc, y, lo_off, med_off, hi_off = predict_cell_rul_trajectory(m_off, dataset_id, test_cell, device)
-    _, _, lo_on, med_on, hi_on = predict_cell_rul_trajectory(m_on, dataset_id, test_cell, device)
+    cyc, y, lo_off, med_off, hi_off = predict_cell_rul_trajectory(
+        m_off,
+        dataset_id,
+        test_cell,
+        device,
+        use_log_rul=ck_off.get("use_log_rul", True),
+        expand=ck_off.get("expand", 0.0),
+    )
+    _, _, lo_on, med_on, hi_on = predict_cell_rul_trajectory(
+        m_on,
+        dataset_id,
+        test_cell,
+        device,
+        use_log_rul=ck_on.get("use_log_rul", True),
+        expand=ck_on.get("expand", 0.0),
+    )
 
     # zoom middle segment
     m = (cyc >= np.percentile(cyc, 40)) & (cyc <= np.percentile(cyc, 55))
@@ -134,7 +151,14 @@ def fig8_rul_confidence(dataset_id: int = 1, device: str = "cpu", model_name: st
     model, ckpt = load_rul_model(model_name, device)
 
     test_cell = sorted(ckpt["test_cells"])[0]
-    cyc, y, lo, med, hi = predict_cell_rul_trajectory(model, dataset_id, test_cell, device)
+    cyc, y, lo, med, hi = predict_cell_rul_trajectory(
+        model,
+        dataset_id,
+        test_cell,
+        device,
+        use_log_rul=ckpt.get("use_log_rul", True),
+        expand=ckpt.get("expand", 0.0),
+    )
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
     ax.plot(cyc, y, "k-", lw=1.5, label="True RUL")
@@ -151,9 +175,16 @@ def fig8_rul_confidence(dataset_id: int = 1, device: str = "cpu", model_name: st
 
 def fig9_transfer(dataset_id: int, device: str = "cpu", source_model: str = "ds1_fused_tcn") -> Path:
     """Fig 9: zero-shot RUL transfer from D1-trained model."""
-    model, _ = load_rul_model(source_model, device)
+    model, ckpt = load_rul_model(source_model, device)
     cell = _pick_valid_cell(dataset_id)
-    cyc, y, lo, med, hi = predict_cell_rul_trajectory(model, dataset_id, cell, device)
+    cyc, y, lo, med, hi = predict_cell_rul_trajectory(
+        model,
+        dataset_id,
+        cell,
+        device,
+        use_log_rul=ckpt.get("use_log_rul", True),
+        expand=ckpt.get("expand", 0.0),
+    )
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
     ax.plot(cyc, y, "k-", lw=1.5, label="True RUL")

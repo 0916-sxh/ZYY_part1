@@ -1,4 +1,4 @@
-"""Thesis-style Fig 1–5 for research content 1."""
+"""Thesis-style Fig 1–5 and Fig 10 for research content 1."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from sklearn.manifold import TSNE
 
 from research_mae.data_extract import CSV_COLS, DATASET_CFG, find_post_charge_relaxation, load_dataset
 from research_mae.evaluate import prepare_cc_tensor
-from research_mae.export_features import load_fused_features
-from research_mae.models import GatedChannelFusion, MSCNNMaskedAE, infer_latent
-from research_mae.train import load_fusion
+from research_mae.models import MSCNNMaskedAE, infer_latent
+from research_mae.train import load_fusion, load_mae
 
 FIG_DIR = Path(__file__).resolve().parent / "figures"
+ROOT = Path(__file__).resolve().parent.parent
 PANEL_LABELS = "abcdefghijklmnopqrstuvwxyz"
 
 
@@ -44,27 +44,40 @@ def _pick_long_life_cell(dataset_id: int, min_cycle: int = 500) -> str:
     return best
 
 
-def _sample_cycles(cmin: int, cmax: int, n: int = 10) -> list[int]:
-    if cmax <= cmin:
-        return [cmin]
-    pts = np.linspace(cmin, cmax, n)
-    return sorted({max(cmin, int(round(p))) for p in pts})
+def _cycles_every_n(available: np.ndarray, step: int = 20, start: int | None = None) -> list[int]:
+    """Pick existing cycles roughly every ``step`` cycles."""
+    avail = np.sort(np.unique(available.astype(int)))
+    if len(avail) == 0:
+        return []
+    if start is None:
+        start = int(avail[avail >= step][0]) if np.any(avail >= step) else int(avail[0])
+    picks = []
+    target = start
+    for c in avail:
+        if c >= target:
+            picks.append(int(c))
+            target = c + step
+    if picks and picks[0] != int(avail[0]) and int(avail[0]) < picks[0]:
+        # keep an early-life anchor if far from first pick
+        if picks[0] - int(avail[0]) >= step // 2:
+            picks = [int(avail[0])] + picks
+    return picks
 
 
 def fig1_relaxation_voltage(
     dataset_id: int = 1,
     cell_id: str | None = None,
-    n_curves: int = 10,
+    cycle_step: int = 20,
 ) -> Path:
-    """Fig 1: absolute terminal voltage during relaxation (D1), blue→red aging gradient."""
+    """Fig 1: absolute voltage, one curve every ``cycle_step`` cycles, blue→red."""
     cfg = DATASET_CFG[dataset_id]
     d = load_dataset(dataset_id)
     if cell_id is None:
         cell_id = _pick_long_life_cell(dataset_id, 500)
-    cmax = int(d["cycle"][d["cell_id"] == cell_id].max())
-    cycles = _sample_cycles(10, cmax, n_curves)
+    avail = d["cycle"][d["cell_id"] == cell_id]
+    cycles = _cycles_every_n(avail, step=cycle_step)
 
-    path = Path(__file__).resolve().parent.parent / cfg["dir"] / f"{cell_id}.csv"
+    path = ROOT / cfg["dir"] / f"{cell_id}.csv"
     df = pd.read_csv(path, usecols=CSV_COLS)
 
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -84,8 +97,7 @@ def fig1_relaxation_voltage(
             continue
         start, stop = window
         t_min = (time_s[start:stop] - time_s[start]) / 60.0
-        v = volt[start:stop]
-        ax.plot(t_min, v, color=cmap(norm(cyc)), lw=1.4, alpha=0.85)
+        ax.plot(t_min, volt[start:stop], color=cmap(norm(cyc)), lw=1.2, alpha=0.85)
         plotted += 1
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -95,47 +107,52 @@ def fig1_relaxation_voltage(
     ax.set_xlim(0, cfg["relax_duration_s"] / 60.0)
     ax.set_xlabel("Relaxation time (min)")
     ax.set_ylabel("Terminal voltage (V)")
-    ax.set_title(f"Fig 1 – Post-charge relaxation voltage ({cell_id}, {plotted} cycles)")
+    ax.set_title(f"Fig 1 – Relaxation voltage every {cycle_step} cycles ({cell_id}, n={plotted})")
     ax.grid(alpha=0.3)
     fig.tight_layout()
     return _save(fig, "fig1_relaxation_voltage.png")
 
 
-def fig2_cc_charge_time(
-    dataset_id: int = 1,
-    cell_id: str | None = None,
-) -> Path:
-    """Fig 2: CC charge duration vs cycle (same cell as Fig 1, spike-filtered cache)."""
-    d = load_dataset(dataset_id)
-    if cell_id is None:
-        cell_id = _pick_long_life_cell(dataset_id, 500)
-    mask = d["cell_id"] == cell_id
-    cycles = d["cycle"][mask]
-    cc_min = d["cc_time_s"][mask] / 60.0
-    order = np.argsort(cycles)
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(cycles[order], cc_min[order], "o-", ms=3, lw=1.2, color="#1f77b4")
-    ax.set_xlabel("Cycle number")
-    ax.set_ylabel("CC charge duration (min)")
-    ax.set_title(f"Fig 2 – CC charge time fade (Dataset {dataset_id}, {cell_id})")
-    ax.grid(alpha=0.3)
+def fig2_cc_charge_time() -> Path:
+    """Fig 2 (a/b/c): CC charge time vs cycle for Dataset 1/2/3 on one figure."""
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+    for ax, ds_id, color in zip(axes, (1, 2, 3), colors):
+        d = load_dataset(ds_id)
+        cell_id = _pick_long_life_cell(ds_id, 300 if ds_id == 3 else 400)
+        mask = d["cell_id"] == cell_id
+        cycles = d["cycle"][mask]
+        cc_min = d["cc_time_s"][mask] / 60.0
+        order = np.argsort(cycles)
+        ax.plot(cycles[order], cc_min[order], "-", lw=1.2, color=color, label=cell_id)
+        ax.set_xlabel("Cycle number")
+        ax.set_ylabel("CC charge duration (min)")
+        ax.set_title(f"({PANEL_LABELS[ds_id - 1]}) Dataset {ds_id}\n{cell_id}")
+        ax.grid(alpha=0.3)
+    fig.suptitle("Fig 2 – CC charge time fade across datasets", y=1.03)
     fig.tight_layout()
-    return _save(fig, "fig2_cc_time_dataset1.png")
+    return _save(fig, "fig2_cc_time_all_datasets.png")
 
 
 @torch.no_grad()
-def _fixed_mask_reconstruct(model: MSCNNMaskedAE, seq: np.ndarray, device: str, seed: int = 0) -> tuple:
+def _block_mask_reconstruct(
+    model: MSCNNMaskedAE, seq: np.ndarray, device: str, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """Force contiguous 30% block mask and reconstruct."""
     torch.manual_seed(seed)
+    np.random.seed(seed)
     x = torch.from_numpy(seq).float().unsqueeze(0).unsqueeze(0).to(device)
-    masked, mask = model.random_mask(x)
+    masked, mask = model.block_mask(x)
     z = model.encode(masked)
     recon = model.decode(z)
     orig = x.squeeze().cpu().numpy()
     m = mask.squeeze().cpu().numpy()
     masked_np = orig.copy()
     masked_np[m < 0.5] = np.nan
-    return orig, masked_np, recon.squeeze().cpu().numpy(), m
+    zero_idx = np.where(m < 0.5)[0]
+    block_start = int(zero_idx[0]) if len(zero_idx) else 0
+    block_end = int(zero_idx[-1]) + 1 if len(zero_idx) else 0
+    return orig, masked_np, recon.squeeze().cpu().numpy(), m, block_start, block_end
 
 
 def fig3_mae_reconstruction(
@@ -143,9 +160,9 @@ def fig3_mae_reconstruction(
     model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> Path:
-    """Fig 3 (a/b/c): MAE reconstruction for D1/D2/D3, early/mid/late panels."""
+    """Fig 3: MAE reconstruction with contiguous 30% block mask (shaded gap)."""
     fig = plt.figure(figsize=(14, 10))
-    gs = gridspec.GridSpec(3, 3, hspace=0.35, wspace=0.28)
+    gs = gridspec.GridSpec(3, 3, hspace=0.38, wspace=0.28)
 
     for row, (ds_id, model, dur_min) in enumerate(
         ((1, model_short, 30), (2, model_short, 30), (3, model_long, 60))
@@ -164,19 +181,24 @@ def fig3_mae_reconstruction(
             if len(idx) == 0:
                 ax.set_visible(False)
                 continue
-            orig, masked, recon, _ = _fixed_mask_reconstruct(model, d["delta_v"][idx[0]], device, seed=ds_id * 100 + cyc)
+            orig, masked, recon, _, b0, b1 = _block_mask_reconstruct(
+                model, d["delta_v"][idx[0]], device, seed=ds_id * 100 + cyc
+            )
             scale = d.get("norm_sigma", 1.0)
-            ax.plot(t, orig * scale * 1000, color="0.45", lw=1.3, label="Original")
-            ax.plot(t, masked * scale * 1000, color="#1f77b4", lw=1.0, ls="--", label="30% masked")
-            ax.plot(t, recon * scale * 1000, color="#d62728", lw=1.3, label="Reconstructed")
+            # shade contiguous masked block
+            if b1 > b0:
+                ax.axvspan(t[b0], t[min(b1, len(t) - 1)], color="#1f77b4", alpha=0.18, label="30% block mask")
+            ax.plot(t, orig * scale * 1000, color="0.45", lw=1.4, label="Original")
+            ax.plot(t, masked * scale * 1000, color="#1f77b4", lw=1.2, label="Visible (block gaps)")
+            ax.plot(t, recon * scale * 1000, color="#d62728", lw=1.4, label="Reconstructed")
             ax.set_title(f"({PANEL_LABELS[row]}) D{ds_id} – {lab} (cycle {cyc})")
             ax.set_xlabel("Resampled time (min)")
             ax.set_ylabel("ΔV (mV)")
             ax.grid(alpha=0.3)
             if row == 0 and col == 0:
-                ax.legend(fontsize=7)
+                ax.legend(fontsize=7, loc="best")
 
-    fig.suptitle("Fig 3 – MS-CNN MAE reconstruction (early / mid / late)", y=1.01)
+    fig.suptitle("Fig 3 – Hybrid Dilated MS-CNN MAE with 30% block masking", y=1.01)
     return _save(fig, "fig3_mae_reconstruction.png")
 
 
@@ -187,7 +209,6 @@ def fig4_latent_manifold(
 ) -> Path:
     """Fig 4 (a/b/c): t-SNE of latent vectors per dataset + Spearman vs cycle."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
-    stats_txt = []
 
     for ax, (ds_id, model) in zip(
         axes, ((1, model_short), (2, model_short), (3, model_long))
@@ -206,8 +227,6 @@ def fig4_latent_manifold(
             emb = PCA(n_components=2).fit_transform(z_sub)
 
         rho, _ = spearmanr(c_sub, emb[:, 0])
-        stats_txt.append(f"D{ds_id} ρ={rho:.3f}")
-
         sc = ax.scatter(emb[:, 0], emb[:, 1], c=c_sub, cmap="viridis", s=6, alpha=0.65)
         fig.colorbar(sc, ax=ax, label="Cycle")
         ax.set_xlabel("Dim 1")
@@ -228,7 +247,7 @@ def fig5_channel_attention(
     model_long: MSCNNMaskedAE,
     device: str = "cpu",
 ) -> Path:
-    """Fig 5 (a/b/c): normalized channel weights vs life ratio (multi-cell mean ± std)."""
+    """Fig 5 (a/b/c): normalized channel weights vs life ratio."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
     bins = np.linspace(0, 1, 21)
 
@@ -238,7 +257,6 @@ def fig5_channel_attention(
         d = load_dataset(ds_id)
 
         x = torch.from_numpy(d["delta_v"]).unsqueeze(1)
-        z = infer_latent(model, x, device).to(device)
         z_mu = np.array(stats["z_mu"], dtype=np.float32)
         z_std = np.array(stats["z_std"], dtype=np.float32)
         z_norm = torch.from_numpy((infer_latent(model, x, device).numpy() - z_mu) / z_std).float().to(device)
@@ -290,14 +308,134 @@ def fig5_channel_attention(
     return _save(fig, "fig5_channel_attention.png")
 
 
+def _segment_protocol(
+    time_s: np.ndarray,
+    voltage: np.ndarray,
+    current: np.ndarray,
+    control_vm: np.ndarray,
+    control_ma: np.ndarray,
+) -> dict[str, tuple[int, int]]:
+    """Locate (I) CC, (II) CV, (III) rest, (IV) discharge index ranges."""
+    n = len(time_s)
+    cc = (current > 50.0) & (np.abs(control_vm - control_ma) < 1.0) & (voltage < 4.19)
+    cv = (current > 5.0) & (voltage >= 4.18) & (~cc)
+    rest = (np.abs(current) < 5.0) & (np.abs(control_vm) < 1e-6) & (voltage > 4.0)
+    dis = current < -50.0
+
+    def _span(mask: np.ndarray) -> tuple[int, int] | None:
+        idx = np.where(mask)[0]
+        if len(idx) < 2:
+            return None
+        # take longest contiguous segment
+        breaks = np.where(np.diff(idx) > 1)[0]
+        segs = np.split(idx, breaks + 1)
+        seg = max(segs, key=len)
+        return int(seg[0]), int(seg[-1]) + 1
+
+    spans = {
+        "I_CC": _span(cc),
+        "II_CV": _span(cv),
+        "III_rest": _span(rest),
+        "IV_discharge": _span(dis),
+    }
+    # fallback: fill missing by sequential search using discharge as anchor
+    dis_span = spans["IV_discharge"]
+    if dis_span is not None and spans["III_rest"] is None:
+        # last high-V rest before discharge
+        pre = slice(0, dis_span[0])
+        rest_pre = rest.copy()
+        rest_pre[dis_span[0] :] = False
+        spans["III_rest"] = _span(rest_pre)
+    return {k: v for k, v in spans.items() if v is not None}
+
+
+def fig10_cycle_protocol(
+    cell_id: str = "CY45-05_1-#1",
+    cycle: int = 5,
+) -> Path:
+    """
+    Fig 10: one-cycle protocol for NCA @ 45°C, 0.5C charge.
+    Regions: (I) CC charge, (II) CV charge, (III) rest, (IV) CC discharge.
+    """
+    path = ROOT / "Dataset_1_NCA_battery" / f"{cell_id}.csv"
+    df = pd.read_csv(path, usecols=CSV_COLS)
+    data = df[df["cycle number"] == float(cycle)].copy()
+    if data.empty:
+        # fallback to first available cycle >= 2
+        cycs = sorted(df["cycle number"].unique())
+        cycle = int(cycs[min(4, len(cycs) - 1)])
+        data = df[df["cycle number"] == float(cycle)].copy()
+
+    time_s = data["time/s"].to_numpy(dtype=np.float64)
+    volt = data["Ecell/V"].to_numpy(dtype=np.float64)
+    current = data["<I>/mA"].to_numpy(dtype=np.float64)
+    control_vm = data["control/V/mA"].to_numpy(dtype=np.float64)
+    control_ma = data["control/mA"].to_numpy(dtype=np.float64)
+    t_min = (time_s - time_s[0]) / 60.0
+
+    spans = _segment_protocol(time_s, volt, current, control_vm, control_ma)
+
+    fig, ax_v = plt.subplots(figsize=(10, 5))
+    ax_i = ax_v.twinx()
+
+    region_style = {
+        "I_CC": ("#c6dbef", "(I) CC charge"),
+        "II_CV": ("#9ecae1", "(II) CV charge"),
+        "III_rest": ("#fcbba1", "(III) Rest"),
+        "IV_discharge": ("#c7e9c0", "(IV) CC discharge"),
+    }
+    for key, (color, label) in region_style.items():
+        if key not in spans:
+            continue
+        a, b = spans[key]
+        ax_v.axvspan(t_min[a], t_min[min(b - 1, len(t_min) - 1)], color=color, alpha=0.45, label=label)
+
+    ln_v = ax_v.plot(t_min, volt, color="#d62728", lw=1.5, label="Voltage")
+    ln_i = ax_i.plot(t_min, current / 1000.0, color="#1f77b4", lw=1.5, label="Current")
+
+    ax_v.set_xlabel("Time within cycle (min)")
+    ax_v.set_ylabel("Terminal voltage (V)", color="#d62728")
+    ax_i.set_ylabel("Current (A)", color="#1f77b4")
+    ax_v.tick_params(axis="y", labelcolor="#d62728")
+    ax_i.tick_params(axis="y", labelcolor="#1f77b4")
+    ax_v.set_title(
+        f"Fig 10 – NCA cycle protocol @ 45°C, 0.5C ({cell_id}, cycle {cycle})"
+    )
+    ax_v.grid(alpha=0.25)
+
+    # combine legends (regions + curves)
+    handles, labels = ax_v.get_legend_handles_labels()
+    handles2, labels2 = ax_i.get_legend_handles_labels()
+    # put voltage/current at end
+    ax_v.legend(handles + handles2, labels + labels2, loc="center right", fontsize=8, framealpha=0.9)
+
+    fig.tight_layout()
+    return _save(fig, "fig10_cycle_protocol_nca_cy45.png")
+
+
 def generate_all_figures(model_short, model_long, device: str = "cpu") -> list[Path]:
-    """Generate thesis Fig 1–5."""
+    """Generate thesis Fig 1–5 and Fig 10."""
     cell = _pick_long_life_cell(1, 500)
     paths = [
-        fig1_relaxation_voltage(cell_id=cell),
-        fig2_cc_charge_time(cell_id=cell),
+        fig1_relaxation_voltage(cell_id=cell, cycle_step=20),
+        fig2_cc_charge_time(),
         fig3_mae_reconstruction(model_short, model_long, device),
         fig4_latent_manifold(model_short, model_long, device),
         fig5_channel_attention(model_short, model_long, device),
+        fig10_cycle_protocol(),
     ]
     return paths
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    p = argparse.ArgumentParser()
+    p.add_argument("--device", default="cpu")
+    args = p.parse_args()
+    ms = load_mae("short", 32, device=args.device)
+    ml = load_mae("long", 64, device=args.device)
+    for path in generate_all_figures(ms, ml, args.device):
+        print(path)
