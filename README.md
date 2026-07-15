@@ -25,9 +25,10 @@
 ├── Dataset_{1,2,3}_*/          # 原始循环 CSV（需自行下载）
 ├── battery_pipeline/           # 论文复现
 ├── research_mae/               # 研究内容一
-│   ├── run_all.py              # MAE + 融合 + 特征导出 + Fig 1–5
-│   ├── thesis_figures.py       # 论文规格图表
-│   ├── models.py               # Hybrid Dilated MS-CNN MAE + 门控融合
+│   ├── run_all.py              # MAE + 融合 + 特征导出 + Fig 1–5、10–11
+│   ├── thesis_figures.py       # 论文规格图表（含 Fig 11 单电芯/全数据组合）
+│   ├── models.py               # Hybrid Dilated MS-CNN MAE + aging head + 门控融合
+│   ├── train.py                # 重构 early-stop；aging-head 冻结微调
 │   ├── cc_filter.py            # D1 CC 突变剔除
 │   ├── features/               # dataset_*_fused.npy
 │   ├── figures/                # Fig 1–5、Fig 10–11
@@ -100,10 +101,14 @@ python research_rul/run_all.py --figures-only --device cuda
   → 满充后弛豫 ΔV 序列（D1/D2: 32 点，D3: 64 点）
   → Hybrid Dilated MS-CNN MAE
        · 并行分支：kernel 3/5/7 + dilation 2/4 + 残差
-       · 30% 连续块掩码；掩码区主导重构损失
-       · Avg+Max 双池化 → 32 维隐向量
-  → 门控通道融合 [弛豫隐向量, CC 充电时间]
-  → 融合特征 f → 导出 .npy（模块解耦）
+       · 30% 连续块掩码；掩码区主导重构损失（0.85 掩码 + 0.15 可见）
+       · Avg+Max 双池化 → 32 维隐向量 z
+       · aging head：对 z 监督老化目标（0.55×fade + 0.45×寿命比率）
+         + SmoothL1 + pairwise ranking；early-stop 只看重构 val MSE
+       · 主训练后 40 epoch：冻结 encoder/decoder，仅微调 aging_head
+         （保证 Fig 3 重构不被冲坏，同时强化 Fig 4 老化轴 Spearman）
+  → 门控通道融合 [弛豫隐向量 z, CC 充电时间]
+  → 融合特征 f → 导出 .npy（模块解耦；下游 RUL 用 z/f，不用 aging 标量）
 ```
 
 **Dataset 1 特殊处理**：`cc_filter.py` 对 CC 充电时间做 rolling-median 突变检测，剔除异常段（约 129 圈）。

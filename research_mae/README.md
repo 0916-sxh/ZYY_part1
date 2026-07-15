@@ -29,7 +29,7 @@ python research_mae/thesis_figures.py --device cuda
 | 文件 | 作用 |
 |------|------|
 | `models.py` | `MSCNNMaskedAE`（Hybrid Dilated MS-CNN + aging head）+ `GatedChannelFusion` |
-| `train.py` | MAE 老化监督训练 + Fusion 训练 |
+| `train.py` | MAE 老化监督；early-stop 只看重构；**冻结 encoder/decoder** 仅微调 aging_head |
 | `thesis_figures.py` | 论文规格 Fig 1–5、Fig 10–11（Fig 4/11 = 老化流形） |
 | `export_features.py` | 导出 `features/dataset_*_fused.npy` |
 | `run_all.py` | 训练 + 评估 + 导出 + 出图 |
